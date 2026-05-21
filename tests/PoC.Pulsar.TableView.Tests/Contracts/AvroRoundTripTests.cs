@@ -18,6 +18,7 @@ public sealed class AvroRoundTripTests
             Provider = "provider-a",
             EntityCoverage = "global",
             Name = "Football",
+            Version = 3,
             SportType = "team",
             ExternalEntities = [
                 new ExternalEntity
@@ -36,6 +37,7 @@ public sealed class AvroRoundTripTests
         Assert.Equal(message.Provider, roundTrip.Provider);
         Assert.Equal(message.EntityCoverage, roundTrip.EntityCoverage);
         Assert.Equal(message.Name, roundTrip.Name);
+        Assert.Equal(message.Version, roundTrip.Version);
         Assert.Equal(message.SportType, roundTrip.SportType);
         Assert.Single(roundTrip.ExternalEntities);
         Assert.Equal("ext-1", roundTrip.ExternalEntities[0].Id);
@@ -50,6 +52,7 @@ public sealed class AvroRoundTripTests
             Provider = "provider-a",
             EntityCoverage = "global",
             Name = "Premier League",
+            Version = 7,
             SportId = "sport-1",
             ParentId = "parent-1",
             SportType = "team",
@@ -70,6 +73,7 @@ public sealed class AvroRoundTripTests
 
         Assert.Equal(message.Id, roundTrip.Id);
         Assert.Equal(message.Name, roundTrip.Name);
+        Assert.Equal(message.Version, roundTrip.Version);
         Assert.Equal(message.SportId, roundTrip.SportId);
         Assert.Equal(message.ParentId, roundTrip.ParentId);
         Assert.Equal(message.SportType, roundTrip.SportType);
@@ -112,10 +116,12 @@ public sealed class AvroRoundTripTests
 
         Assert.Contains(sportSchema.Fields, field => field.Name == nameof(Entity.Id));
         Assert.Contains(sportSchema.Fields, field => field.Name == nameof(OfferHierarchyEntity.Name));
+        Assert.Contains(sportSchema.Fields, field => field.Name == nameof(OfferHierarchyEntity.Version));
         Assert.Contains(sportSchema.Fields, field => field.Name == nameof(SportMessage.SportType));
 
         Assert.Contains(categorySchema.Fields, field => field.Name == nameof(Entity.Id));
         Assert.Contains(categorySchema.Fields, field => field.Name == nameof(OfferHierarchyEntity.Name));
+        Assert.Contains(categorySchema.Fields, field => field.Name == nameof(OfferHierarchyEntity.Version));
         Assert.Contains(categorySchema.Fields, field => field.Name == nameof(RawCategoryMessage.SportId));
     }
 

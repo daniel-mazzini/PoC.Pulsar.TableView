@@ -24,6 +24,7 @@
       "default": []
     },
     { "name": "Name", "type": "string" },
+    { "name": "Version", "type": "int" },
     { "name": "SportId", "type": "string" },
     { "name": "ParentId", "type": ["null", "string"], "default": null },
     { "name": "SportType", "type": ["null", "string"], "default": null },

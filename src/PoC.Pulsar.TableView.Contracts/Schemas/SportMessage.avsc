@@ -24,6 +24,7 @@
       "default": []
     },
     { "name": "Name", "type": "string" },
+    { "name": "Version", "type": "int" },
     { "name": "SportType", "type": "string" }
   ]
 }

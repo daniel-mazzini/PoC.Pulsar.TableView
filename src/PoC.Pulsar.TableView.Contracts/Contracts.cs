@@ -11,6 +11,8 @@ public class Entity
 public class OfferHierarchyEntity : Entity
 {
     public string Name { get; init; } = null!;
+
+    public int Version { get; init; }
 }
 
 public sealed class ExternalEntity

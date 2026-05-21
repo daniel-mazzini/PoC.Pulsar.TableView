@@ -1,4 +1,11 @@
+using Aspire.Hosting;
+
 var builder = DistributedApplication.CreateBuilder(args);
+
+var appHostDirectory = new DirectoryInfo(AppContext.BaseDirectory);
+var configuration = appHostDirectory.Parent?.Parent?.Name ?? "Debug";
+var repositoryRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+var cliDllPath = Path.GetFullPath(Path.Combine(repositoryRoot, "src", "PoC.Pulsar.TableView.Cli", "bin", configuration, "net10.0", "PoC.Pulsar.TableView.Cli.dll"));
 
 var pulsar = builder.AddContainer("pulsar", "apachepulsar/pulsar", "3.2.1")
     .WithEndpoint(port: 6650, targetPort: 6650, name: "broker")
@@ -28,9 +35,23 @@ var pulsarInit = builder.AddContainer("pulsar-init", "apachepulsar/pulsar", "3.2
     .WaitFor(pulsar);
 
 builder.AddContainer("dekaf", "visortelle/dekaf", "1.1.0")
-    .WithEndpoint(port: 8090, targetPort: 8090, name: "http")
+    .WithHttpEndpoint(port: 8090, targetPort: 8090, name: "http")
     .WithEnvironment("DEKAF_PULSAR_WEB_URL", "http://pulsar:8080")
     .WithEnvironment("DEKAF_PULSAR_BROKER_URL", "pulsar://pulsar:6650")
     .WaitFor(pulsarInit);
+
+builder.AddExecutable(
+        "cli-publish-sample",
+        "dotnet",
+        repositoryRoot,
+        "run",
+        "--project",
+        "src/PoC.Pulsar.TableView.Cli/PoC.Pulsar.TableView.Cli.csproj",
+        "--",
+        "publish-sample")
+    .WithEnvironment("PULSAR_SERVICE_URL", "pulsar://127.0.0.1:6650")
+    .WithEnvironment("PULSAR_INPUT_NAMESPACE", "public/tableview-inputs")
+    .WaitForCompletion(pulsarInit)
+    .WithExplicitStart();
 
 builder.Build().Run();

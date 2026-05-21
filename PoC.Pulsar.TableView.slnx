@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="src/PoC.Pulsar.TableView.AppHost/PoC.Pulsar.TableView.AppHost.csproj" />
+  <Project Path="src/PoC.Pulsar.TableView.Cli/PoC.Pulsar.TableView.Cli.csproj" />
+  <Project Path="src/PoC.Pulsar.TableView.Contracts/PoC.Pulsar.TableView.Contracts.csproj" />
+  <Project Path="src/PoC.Pulsar.TableView.Infrastructure.Store/PoC.Pulsar.TableView.Infrastructure.Store.csproj" />
+  <Project Path="tests/PoC.Pulsar.TableView.Tests/PoC.Pulsar.TableView.Tests.csproj" />
+</Solution>
