@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Diagnostics.CodeAnalysis;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using DotPulsar;
@@ -29,6 +30,7 @@ public sealed class PulsarTableView<TValue> : IPulsarTableView<TValue>
 
     public IObservable<Event<TValue>> OnUpdate => _subject.AsObservable();
 
+    [ExcludeFromCodeCoverage]
     public PulsarTableView(IPulsarClient client,
                            string topic,
                            Func<ReadOnlySequence<byte>, TValue> valueDeserializer,
@@ -152,6 +154,7 @@ public sealed class PulsarTableView<TValue> : IPulsarTableView<TValue>
         return true;
     }
 
+    [ExcludeFromCodeCoverage]
     private static async ValueTask<IReadOnlyDictionary<int, PulsarMessageId>> GetHighWatermarksAsync(IPulsarClient client,
                                                                                                       string topic,
                                                                                                       CancellationToken cancellationToken)
@@ -172,6 +175,7 @@ public sealed class PulsarTableView<TValue> : IPulsarTableView<TValue>
         return watermarks;
     }
 
+    [ExcludeFromCodeCoverage]
     private static async IAsyncEnumerable<TableViewMessage> ReadBootstrapMessagesAsync(IPulsarClient client,
                                                                                         string topic,
                                                                                         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
@@ -188,6 +192,7 @@ public sealed class PulsarTableView<TValue> : IPulsarTableView<TValue>
         }
     }
 
+    [ExcludeFromCodeCoverage]
     private static async IAsyncEnumerable<TableViewMessage> ReadLiveMessagesAsync(IPulsarClient client,
                                                                                    string topic,
                                                                                    MessageId startMessageId,

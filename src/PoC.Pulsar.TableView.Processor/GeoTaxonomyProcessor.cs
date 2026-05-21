@@ -12,16 +12,19 @@ internal sealed class GeoTaxonomyProcessor
     private readonly IPulsarTableView<SportMessage> _sportsTableView;
     private readonly IPulsarTableView<RawCategoryMessage> _categoriesTableView;
     private readonly ILogger<GeoTaxonomyProcessor> _logger;
+    private readonly ITaxonomyViewPublisher? _publisher;
 
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _categoryToSportId = new(StringComparer.Ordinal);
 
     public GeoTaxonomyProcessor(IPulsarTableView<SportMessage> sportsView,
                                 IPulsarTableView<RawCategoryMessage> categoriesView,
-                                ILogger<GeoTaxonomyProcessor> logger)
+                                ILogger<GeoTaxonomyProcessor> logger,
+                                ITaxonomyViewPublisher? publisher = null)
     {
         _sportsTableView = sportsView;
         _categoriesTableView = categoriesView;
         _logger = logger;
+        _publisher = publisher;
     }
 
     public async Task RunAsync(CancellationToken cancellationToken)
@@ -113,13 +116,13 @@ internal sealed class GeoTaxonomyProcessor
                                        Environment.NewLine,
                                        ToJson(update.NewValue));
                 // Disparamos la reconstrucción asíncrona y la olvidamos (fire and forget seguro)
-                _ = LogTaxonomyForSportAsync(update.Key, "sport update");
+                _ = PublishTaxonomyForSportAsync(update.Key, "sport update");
                 break;
 
             case DeleteEvent<SportMessage> delete:
                 _logger.LogInformation("Sports live delete for key {Key}.",
                                        delete.Key);
-                _ = LogTaxonomyForSportAsync(delete.Key, "sport delete");
+                _ = PublishTaxonomyForSportAsync(delete.Key, "sport delete");
                 break;
         }
     }
@@ -136,10 +139,10 @@ internal sealed class GeoTaxonomyProcessor
 
                 if (!string.IsNullOrWhiteSpace(previousSportId) && !string.Equals(previousSportId, update.NewValue.SportId, StringComparison.Ordinal))
                 {
-                    _ = LogTaxonomyForSportAsync(previousSportId, "category sport change");
+                    _ = PublishTaxonomyForSportAsync(previousSportId, "category sport change");
                 }
 
-                _ = LogTaxonomyForSportAsync(update.NewValue.SportId, "category update");
+                _ = PublishTaxonomyForSportAsync(update.NewValue.SportId, "category update");
                 break;
 
             case DeleteEvent<RawCategoryMessage> delete:
@@ -147,7 +150,7 @@ internal sealed class GeoTaxonomyProcessor
 
                 if (_categoryToSportId.TryRemove(delete.Key, out var sportId))
                 {
-                    _ = LogTaxonomyForSportAsync(sportId, "category delete");
+                    _ = PublishTaxonomyForSportAsync(sportId, "category delete");
                 }
                 else
                 {
@@ -158,18 +161,23 @@ internal sealed class GeoTaxonomyProcessor
         }
     }
 
-    private async Task LogTaxonomyForSportAsync(string sportId, string reason)
+    private async Task PublishTaxonomyForSportAsync(string sportId, string reason)
     {
         var sport = _sportsTableView.Get(sportId);
 
         if (sport is null)
         {
-            _logger.LogInformation("Taxonomy projection removed for sport {SportId} after {Reason}.", sportId, reason);
+            _logger.LogInformation("Taxonomy projection removed for sport {SportId} after {Reason}. Publishing Tombstone.", sportId, reason);
+            // Si el deporte ya no existe, enviamos un Tombstone para borrar la vista
+            if (_publisher is not null)
+            {
+                await _publisher.DeleteAsync(sportId);
+            }
             return;
         }
 
         var sportCategories = new List<RawCategoryMessage>();
-
+        
         await foreach (var category in _categoriesTableView.GetAllAsync().ConfigureAwait(false))
         {
             if (string.Equals(category.SportId, sportId, StringComparison.Ordinal))
@@ -179,12 +187,14 @@ internal sealed class GeoTaxonomyProcessor
         }
 
         var taxonomy = BuildTaxonomy(sport, sportCategories);
-
-        _logger.LogInformation("Taxonomy projection recalculated for sport {SportId} after {Reason}:{NewLine}{Payload}",
-                               sportId,
-                               reason,
-                               Environment.NewLine,
-                               ToJson(taxonomy));
+        
+        _logger.LogInformation("Publishing recalculated taxonomy for sport {SportId} after {Reason}.", sportId, reason);
+        
+        // PUBLICAMOS EL RESULTADO A PULSAR
+        if (_publisher is not null)
+        {
+            await _publisher.PublishAsync(taxonomy);
+        }
     }
 
     private static string ToJson<T>(T value) => JsonSerializer.Serialize(value, new JsonSerializerOptions { WriteIndented = true });

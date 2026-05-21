@@ -22,31 +22,3 @@ public sealed class ExternalEntity
     public string EntityCoverage { get; init; } = null!;
     public string DefaultName { get; init; } = null!;
 }
-
-public sealed class SportMessage : OfferHierarchyEntity
-{
-    public string SportType { get; init; } = null!;
-}
-
-public sealed class RawCategoryMessage : OfferHierarchyEntity
-{
-    public string SportId { get; init; } = null!;
-    public string? ParentId { get; init; }
-    public string? SportType { get; init; }
-    public string? CountryCode { get; init; }
-    public string? Gender { get; init; }
-}
-
-public sealed class GeoTaxonomyNode
-{
-    public string CountryCode { get; init; } = null!;
-}
-
-public sealed class GeoTaxonomyMessage
-{
-    public string SportId { get; init; } = null!;
-    public string SportName { get; init; } = null!;
-    public string SportType { get; init; } = null!;
-    public int Version { get; init; } // used in compactation to detect changes in the taxonomy and avoid unnecessary updates when only the categories change
-    public List<GeoTaxonomyNode> GeoCategories { get; init; } = [];
-}

@@ -57,13 +57,5 @@ public sealed class InMemoryStateStore<TKey, TValue> : IStateStore<TKey, TValue>
         }
     }
 
-    public async Task ScanAsync(Func<TKey, TValue, ValueTask> visitor, CancellationToken cancellationToken)
-    {
-        foreach (var kvp in _values)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            await visitor(kvp.Key, kvp.Value).ConfigureAwait(false);
-        }
-    }
 
 }

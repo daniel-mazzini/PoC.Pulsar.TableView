@@ -91,6 +91,73 @@ public sealed class PulsarTableViewTests
     }
 
     [Fact]
+    public async Task start_bootstrap_async_should_skip_messages_without_key()
+    {
+        var store = new InMemoryStateStore<string, string>();
+        var logger = new ListLogger<PulsarTableView<string>>();
+
+        var view = new PulsarTableView<string>(
+            store,
+            "persistent://public/default/sports",
+            Deserialize,
+            _ => ValueTask.FromResult<IReadOnlyDictionary<int, PulsarMessageId>>(new Dictionary<int, PulsarMessageId>
+            {
+                [0] = new(1, 2, 0)
+            }),
+            cancellationToken => ReadMessagesAsync(cancellationToken),
+            (_, cancellationToken) => EmptyAsync(cancellationToken),
+            logger);
+
+        await view.StartBootstrapAsync();
+
+        Assert.Equal("Tennis", view.Get("sport-2"));
+        Assert.Single(await ToListAsync(view.GetAllAsync()));
+        Assert.Contains(logger.Messages, message => message.Contains("Skipping message without key", StringComparison.Ordinal));
+
+        static async IAsyncEnumerable<TableViewMessage> ReadMessagesAsync(
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            yield return new TableViewMessage(null, new ReadOnlySequence<byte>(Encoding.UTF8.GetBytes("Football")), new PulsarMessageId(1, 1, 0));
+            await Task.Yield();
+            yield return CreateMessage("sport-2", "Tennis", new PulsarMessageId(1, 2, 0));
+        }
+    }
+
+    [Fact]
+    public async Task start_bootstrap_async_should_complete_when_message_ledger_exceeds_high_watermark_ledger()
+    {
+        var store = new InMemoryStateStore<string, string>();
+        var logger = new ListLogger<PulsarTableView<string>>();
+
+        var view = new PulsarTableView<string>(
+            store,
+            "persistent://public/default/sports",
+            Deserialize,
+            _ => ValueTask.FromResult<IReadOnlyDictionary<int, PulsarMessageId>>(new Dictionary<int, PulsarMessageId>
+            {
+                [0] = new(1, 99, 0)
+            }),
+            cancellationToken => ReadMessagesAsync(cancellationToken),
+            (_, cancellationToken) => EmptyAsync(cancellationToken),
+            logger);
+
+        await view.StartBootstrapAsync();
+
+        Assert.Equal("Football", view.Get("sport-1"));
+        Assert.Equal(new PulsarMessageId(2, 1, 0), store.GetLastCheckpoint());
+        Assert.Contains(logger.Messages, message => message.Contains("Bootstrap successfully completed", StringComparison.Ordinal));
+
+        static async IAsyncEnumerable<TableViewMessage> ReadMessagesAsync(
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            yield return CreateMessage("sport-1", "Football", new PulsarMessageId(2, 1, 0));
+            await Task.Yield();
+        }
+    }
+
+    [Fact]
     public async Task start_live_tail_async_should_apply_changes_and_emit_events()
     {
         var store = new InMemoryStateStore<string, string>();
