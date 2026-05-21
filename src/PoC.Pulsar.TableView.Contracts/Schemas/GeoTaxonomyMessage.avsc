@@ -1,0 +1,24 @@
+{
+  "type": "record",
+  "name": "GeoTaxonomyMessage",
+  "namespace": "PoC.Pulsar.TableView.Contracts",
+  "fields": [
+    { "name": "SportId", "type": "string" },
+    { "name": "SportName", "type": "string" },
+    { "name": "SportType", "type": "string" },
+    {
+      "name": "GeoCategories",
+      "type": {
+        "type": "array",
+        "items": {
+          "type": "record",
+          "name": "GeoTaxonomyNode",
+          "fields": [
+            { "name": "CountryCode", "type": "string" }
+          ]
+        }
+      },
+      "default": []
+    }
+  ]
+}

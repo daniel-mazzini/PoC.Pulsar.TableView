@@ -1,0 +1,29 @@
+{
+  "type": "record",
+  "name": "SportMessage",
+  "namespace": "PoC.Pulsar.TableView.Contracts",
+  "fields": [
+    { "name": "Id", "type": "string" },
+    { "name": "Provider", "type": "string" },
+    { "name": "EntityCoverage", "type": "string" },
+    {
+      "name": "ExternalEntities",
+      "type": {
+        "type": "array",
+        "items": {
+          "type": "record",
+          "name": "ExternalEntity",
+          "fields": [
+            { "name": "Id", "type": "string" },
+            { "name": "Provider", "type": "string" },
+            { "name": "EntityCoverage", "type": "string" },
+            { "name": "DefaultName", "type": "string" }
+          ]
+        }
+      },
+      "default": []
+    },
+    { "name": "Name", "type": "string" },
+    { "name": "SportType", "type": "string" }
+  ]
+}
