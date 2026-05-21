@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\PoC.Pulsar.TableView.Cli\PoC.Pulsar.TableView.Cli.csproj" />
+    <ProjectReference Include="..\PoC.Pulsar.TableView.Processor\PoC.Pulsar.TableView.Processor.csproj" />
   </ItemGroup>
 
 </Project>

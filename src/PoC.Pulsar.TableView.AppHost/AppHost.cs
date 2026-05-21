@@ -54,4 +54,16 @@ builder.AddExecutable(
     .WaitForCompletion(pulsarInit)
     .WithExplicitStart();
 
+builder.AddExecutable(
+        "processor",
+        "dotnet",
+        repositoryRoot,
+        "run",
+        "--project",
+        "src/PoC.Pulsar.TableView.Processor/PoC.Pulsar.TableView.Processor.csproj")
+    .WithEnvironment("PULSAR_SERVICE_URL", "pulsar://127.0.0.1:6650")
+    .WithEnvironment("PULSAR_INPUT_NAMESPACE", "public/tableview-inputs")
+    .WaitForCompletion(pulsarInit)
+    .WithExplicitStart();
+
 builder.Build().Run();

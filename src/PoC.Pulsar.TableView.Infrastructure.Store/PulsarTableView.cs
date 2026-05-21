@@ -9,27 +9,24 @@ using PoC.Pulsar.TableView.Infrastructure.Store.Abstractions;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store;
 
-// --- DUs para los eventos ---
 public abstract record Event<T>(string Key);
 public record DeleteEvent<T>(string Key) : Event<T>(Key);
 public record UpdateEvent<T>(string Key, T NewValue) : Event<T>(Key);
-internal readonly record struct BootstrapMessage(string? Key, ReadOnlySequence<byte> Data, PulsarMessageId MessageId);
+internal readonly record struct TableViewMessage(string? Key, ReadOnlySequence<byte> Data, PulsarMessageId MessageId);
 
 public sealed class PulsarTableView<TValue> : IPulsarTableView<TValue>
     where TValue : class
 {
     private readonly IStateStore<string, TValue> _stateStore;
     private readonly Func<ReadOnlySequence<byte>, TValue> _valueDeserializer;
-    
-    // Ahora devuelve un diccionario de MessageId por cada Partición
     private readonly Func<CancellationToken, ValueTask<IReadOnlyDictionary<int, PulsarMessageId>>> _getHighWatermarks;
-    private readonly Func<CancellationToken, IAsyncEnumerable<BootstrapMessage>> _readBootstrapMessages;
-    
+    private readonly Func<CancellationToken, IAsyncEnumerable<TableViewMessage>> _readBootstrapMessages;
+    private readonly Func<MessageId, CancellationToken, IAsyncEnumerable<TableViewMessage>> _readLiveMessages;
     private readonly ILogger<PulsarTableView<TValue>> _logger;
     private readonly string _topic;
     private readonly Subject<Event<TValue>> _subject = new();
+    private MessageId? _liveTailStartMessageId;
 
-    // El flujo al que se suscribirá tu Proyector (Live Tail)
     public IObservable<Event<TValue>> OnUpdate => _subject.AsObservable();
 
     public PulsarTableView(IPulsarClient client,
@@ -42,6 +39,7 @@ public sealed class PulsarTableView<TValue> : IPulsarTableView<TValue>
                valueDeserializer,
                cancellationToken => GetHighWatermarksAsync(client, topic, cancellationToken),
                cancellationToken => ReadBootstrapMessagesAsync(client, topic, cancellationToken),
+               (startMessageId, cancellationToken) => ReadLiveMessagesAsync(client, topic, startMessageId, cancellationToken),
                logger)
     {
     }
@@ -50,88 +48,113 @@ public sealed class PulsarTableView<TValue> : IPulsarTableView<TValue>
                              string topic,
                              Func<ReadOnlySequence<byte>, TValue> valueDeserializer,
                              Func<CancellationToken, ValueTask<IReadOnlyDictionary<int, PulsarMessageId>>> getHighWatermarks,
-                             Func<CancellationToken, IAsyncEnumerable<BootstrapMessage>> readBootstrapMessages,
+                             Func<CancellationToken, IAsyncEnumerable<TableViewMessage>> readBootstrapMessages,
+                             Func<MessageId, CancellationToken, IAsyncEnumerable<TableViewMessage>> readLiveMessages,
                              ILogger<PulsarTableView<TValue>> logger)
     {
         _stateStore = stateStore;
+        _topic = topic;
         _valueDeserializer = valueDeserializer;
         _getHighWatermarks = getHighWatermarks;
         _readBootstrapMessages = readBootstrapMessages;
+        _readLiveMessages = readLiveMessages;
         _logger = logger;
-        _topic = topic;
     }
 
     public TValue? Get(string key) => _stateStore.Get(key);
 
-    public IEnumerable<TValue> GetAll() => _stateStore.GetAll();
-
     public async Task StartBootstrapAsync(CancellationToken cancellationToken = default)
     {
-        // 1. Get the high-watermark for each partition to know when we can consider the bootstrap complete
         var targetWatermarks = await _getHighWatermarks(cancellationToken);
 
         if (targetWatermarks.Count == 0)
         {
+            _liveTailStartMessageId = null;
             _logger.LogInformation("No messages found in topic {Topic}. Bootstrap completed instantly.", _topic);
             return;
         }
+
+        _liveTailStartMessageId = ToDotPulsarMessageId(SelectLiveTailStartMessageId(targetWatermarks), _topic);
 
         _logger.LogInformation("Starting bootstrap for topic {Topic} across {PartitionCount} partitions.", _topic, targetWatermarks.Count);
 
         var completedPartitions = new HashSet<int>();
 
-        // 2. Read messages in order (compacted) and apply them to the state store until we reach the high-watermark for each partition
         await foreach (var message in _readBootstrapMessages(cancellationToken).WithCancellation(cancellationToken))
         {
-            if (string.IsNullOrWhiteSpace(message.Key))
+            if (!TryApplyMessage(message, emitEvents: false))
             {
-                _logger.LogWarning("Skipping message without key during bootstrap at {LedgerId}:{EntryId}:{PartitionIndex}.",
-                                   message.MessageId.LedgerId, message.MessageId.EntryId, message.MessageId.PartitionIndex);
                 continue;
             }
 
-            // 3. Apply the message to the state store. 
-            //   - If the message has empty data, we treat it as a delete (tombstone).
-            //   - Otherwise, we deserialize and upsert the value.
-            //   - Never emit events to the subject during bootstrap.
-            if (message.Data.Length == 0)
-            {
-                _stateStore.Delete(message.Key);
-            }
-            else
-            {
-                var value = _valueDeserializer(message.Data);
-                _stateStore.Upsert(message.Key, value);
-            }
-
-            // 4. Verify if we've reached the high-watermark for the partition of the current message. If so, mark that partition as completed.
             var currentPartition = message.MessageId.PartitionIndex;
-            
-            if (targetWatermarks.TryGetValue(currentPartition, out var watermarkForPartition))
+
+            if (targetWatermarks.TryGetValue(currentPartition, out var watermarkForPartition)
+                && HasReachedOrExceeded(message.MessageId, watermarkForPartition)
+                && completedPartitions.Add(currentPartition))
             {
-                if (HasReachedOrExceeded(message.MessageId, watermarkForPartition))
-                {
-                    if (completedPartitions.Add(currentPartition))
-                    {
-                        _logger.LogInformation("Partition {PartitionIndex} reached its high-watermark ({LedgerId}:{EntryId}).", 
-                                               currentPartition, watermarkForPartition.LedgerId, watermarkForPartition.EntryId);
-                    }
-                }
+                _logger.LogInformation("Partition {PartitionIndex} reached its high-watermark ({LedgerId}:{EntryId}).",
+                                       currentPartition, watermarkForPartition.LedgerId, watermarkForPartition.EntryId);
             }
 
-            // 5. Exit condition: if we've completed all partitions, we can consider the bootstrap complete and exit the loop.
             if (completedPartitions.Count == targetWatermarks.Count)
             {
-                _logger.LogInformation("Bootstrap successfully completed for all {PartitionCount} partitions of topic {Topic}.", 
+                _logger.LogInformation("Bootstrap successfully completed for all {PartitionCount} partitions of topic {Topic}.",
                                        targetWatermarks.Count, _topic);
                 return;
             }
         }
     }
 
+    public async Task StartLiveTailAsync(CancellationToken cancellationToken)
+    {
+        var startMessageId = _liveTailStartMessageId ?? MessageId.Latest;
+
+        _logger.LogInformation("Starting live tail for topic {Topic} from message id {MessageId}.", _topic, startMessageId);
+
+        await foreach (var message in _readLiveMessages(startMessageId, cancellationToken).WithCancellation(cancellationToken))
+        {
+            TryApplyMessage(message, emitEvents: true);
+        }
+    }
+
+    private bool TryApplyMessage(TableViewMessage message, bool emitEvents)
+    {
+        if (string.IsNullOrWhiteSpace(message.Key))
+        {
+            _logger.LogWarning("Skipping message without key at {LedgerId}:{EntryId}:{PartitionIndex}.",
+                               message.MessageId.LedgerId, message.MessageId.EntryId, message.MessageId.PartitionIndex);
+            return false;
+        }
+
+        if (message.Data.Length == 0)
+        {
+            _stateStore.Delete(message.Key);
+            _stateStore.SaveCheckpoint(message.MessageId);
+
+            if (emitEvents)
+            {
+                _subject.OnNext(new DeleteEvent<TValue>(message.Key));
+            }
+
+            return true;
+        }
+
+        var value = _valueDeserializer(message.Data);
+        _stateStore.Upsert(message.Key, value);
+        _stateStore.SaveCheckpoint(message.MessageId);
+
+        if (emitEvents)
+        {
+            _subject.OnNext(new UpdateEvent<TValue>(message.Key, value));
+        }
+
+        return true;
+    }
+
     private static async ValueTask<IReadOnlyDictionary<int, PulsarMessageId>> GetHighWatermarksAsync(IPulsarClient client,
-                                                                                                     string topic,
-                                                                                                     CancellationToken cancellationToken)
+                                                                                                      string topic,
+                                                                                                      CancellationToken cancellationToken)
     {
         await using var reader = client.NewReader(Schema.ByteSequence)
             .Topic(topic)
@@ -141,17 +164,17 @@ public sealed class PulsarTableView<TValue> : IPulsarTableView<TValue>
         var messageIds = await reader.GetLastMessageIds(cancellationToken);
         var watermarks = new Dictionary<int, PulsarMessageId>();
 
-        foreach (var msgId in messageIds)
+        foreach (var messageId in messageIds)
         {
-            watermarks[msgId.Partition] = ToPulsarMessageId(msgId);
+            watermarks[messageId.Partition] = ToPulsarMessageId(messageId);
         }
 
         return watermarks;
     }
 
-    private static async IAsyncEnumerable<BootstrapMessage> ReadBootstrapMessagesAsync(IPulsarClient client,
-                                                                                       string topic,
-                                                                                       [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    private static async IAsyncEnumerable<TableViewMessage> ReadBootstrapMessagesAsync(IPulsarClient client,
+                                                                                        string topic,
+                                                                                        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
         await using var reader = client.NewReader(Schema.ByteSequence)
             .Topic(topic)
@@ -161,13 +184,34 @@ public sealed class PulsarTableView<TValue> : IPulsarTableView<TValue>
 
         await foreach (var message in reader.Messages(cancellationToken))
         {
-            yield return new BootstrapMessage(message.Key, message.Data, ToPulsarMessageId(message.MessageId));
+            yield return new TableViewMessage(message.Key, message.Data, ToPulsarMessageId(message.MessageId));
         }
+    }
+
+    private static async IAsyncEnumerable<TableViewMessage> ReadLiveMessagesAsync(IPulsarClient client,
+                                                                                   string topic,
+                                                                                   MessageId startMessageId,
+                                                                                   [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        await using var reader = client.NewReader(Schema.ByteSequence)
+            .Topic(topic)
+            .StartMessageId(startMessageId)
+            .Create();
+
+        await foreach (var message in reader.Messages(cancellationToken))
+        {
+            yield return new TableViewMessage(message.Key, message.Data, ToPulsarMessageId(message.MessageId));
+        }
+    }
+
+    private static PulsarMessageId SelectLiveTailStartMessageId(IReadOnlyDictionary<int, PulsarMessageId> targetWatermarks)
+    {
+        return targetWatermarks.Values.Aggregate((current, candidate) =>
+            HasReachedOrExceeded(candidate, current) ? candidate : current);
     }
 
     private static bool HasReachedOrExceeded(PulsarMessageId current, PulsarMessageId target)
     {
-        // Pulsar orders messages first by LedgerId, and within the same Ledger, by EntryId.
         if (current.LedgerId != target.LedgerId)
         {
             return current.LedgerId > target.LedgerId;
@@ -176,10 +220,12 @@ public sealed class PulsarTableView<TValue> : IPulsarTableView<TValue>
         return current.EntryId >= target.EntryId;
     }
 
-    private static PulsarMessageId ToPulsarMessageId(MessageId messageId) 
-        => new PulsarMessageId(checked((long)messageId.LedgerId),
-                               checked((long)messageId.EntryId),
-                               messageId.Partition);
+    private static PulsarMessageId ToPulsarMessageId(MessageId messageId)
+        => new(checked((long)messageId.LedgerId), checked((long)messageId.EntryId), messageId.Partition);
 
-    
+    private static MessageId ToDotPulsarMessageId(PulsarMessageId messageId, string topic)
+        => new(checked((ulong)messageId.LedgerId), checked((ulong)messageId.EntryId), messageId.PartitionIndex, -1, topic);
+
+    public IAsyncEnumerable<TValue> GetAllAsync(CancellationToken cancellationToken = default) => _stateStore.GetAllAsync(cancellationToken);
+
 }

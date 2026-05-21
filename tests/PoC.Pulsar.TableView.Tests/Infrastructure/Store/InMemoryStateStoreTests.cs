@@ -16,7 +16,7 @@ public sealed class InMemoryStateStoreTests
     }
 
     [Fact]
-    public void delete_removes_value_from_store()
+    public async Task delete_removes_value_from_store()
     {
         var store = new InMemoryStateStore<string, string>();
 
@@ -26,11 +26,11 @@ public sealed class InMemoryStateStoreTests
 
         Assert.True(deleted);
         Assert.Null(store.Get("sport-1"));
-        Assert.Empty(store.GetAll());
+        Assert.Empty(await ToListAsync(store.GetAllAsync()));
     }
 
     [Fact]
-    public void clear_removes_all_values()
+    public async Task clear_removes_all_values()
     {
         var store = new InMemoryStateStore<string, string>();
 
@@ -41,21 +41,33 @@ public sealed class InMemoryStateStoreTests
 
         Assert.Null(store.Get("sport-1"));
         Assert.Null(store.Get("sport-2"));
-        Assert.Empty(store.GetAll());
+        Assert.Empty(await ToListAsync(store.GetAllAsync()));
     }
 
     [Fact]
-    public void get_all_returns_current_snapshot_of_values()
+    public async Task get_all_returns_current_snapshot_of_values()
     {
         var store = new InMemoryStateStore<string, string>();
 
         store.Upsert("sport-1", "Football");
         store.Upsert("sport-2", "Tennis");
 
-        var values = store.GetAll().ToArray();
+        var values = await ToListAsync(store.GetAllAsync());
 
-        Assert.Equal(2, values.Length);
+        Assert.Equal(2, values.Count);
         Assert.Contains("Football", values);
         Assert.Contains("Tennis", values);
+    }
+
+    private static async Task<List<T>> ToListAsync<T>(IAsyncEnumerable<T> source)
+    {
+        var values = new List<T>();
+
+        await foreach (var value in source)
+        {
+            values.Add(value);
+        }
+
+        return values;
     }
 }

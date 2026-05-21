@@ -12,5 +12,5 @@ public interface IStateStore<TKey, TValue> : ICheckpointStore
 
     void Clear();
 
-    IEnumerable<TValue> GetAll();
+    IAsyncEnumerable<TValue> GetAllAsync(CancellationToken cancellationToken = default);
 }

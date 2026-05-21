@@ -31,9 +31,14 @@ public sealed class InMemoryStateStore<TKey, TValue> : IStateStore<TKey, TValue>
         _values.Clear();
     }
 
-    public IEnumerable<TValue> GetAll()
+    public async IAsyncEnumerable<TValue> GetAllAsync([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        return _values.Values.ToArray();
+        foreach (var value in _values.Values.ToArray())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            yield return value;
+            await Task.Yield();
+        }
     }
 
     public void SaveCheckpoint(PulsarMessageId id)
@@ -51,4 +56,14 @@ public sealed class InMemoryStateStore<TKey, TValue> : IStateStore<TKey, TValue>
             return _lastCheckpoint;
         }
     }
+
+    public async Task ScanAsync(Func<TKey, TValue, ValueTask> visitor, CancellationToken cancellationToken)
+    {
+        foreach (var kvp in _values)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await visitor(kvp.Key, kvp.Value).ConfigureAwait(false);
+        }
+    }
+
 }
