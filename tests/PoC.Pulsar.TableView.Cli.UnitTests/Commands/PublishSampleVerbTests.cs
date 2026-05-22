@@ -1,8 +1,8 @@
 using CommandLine;
-using PoC.Pulsar.TableView.Cli;
+using PoC.Pulsar.TableView.Cli.Commands;
 using Xunit;
 
-namespace PoC.Pulsar.TableView.Cli.UnitTests;
+namespace PoC.Pulsar.TableView.Cli.UnitTests.Commands;
 
 public sealed class PublishSampleVerbTests
 {

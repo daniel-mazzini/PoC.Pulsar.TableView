@@ -7,7 +7,6 @@
 		<Project Path="src/PoC.Pulsar.TableView.Processor/PoC.Pulsar.TableView.Processor.csproj" />
 	</Folder>
 	<Folder Name="/tests/">
-		<Project Path="tests/PoC.Pulsar.TableView.AppHost.UnitTests/PoC.Pulsar.TableView.AppHost.UnitTests.csproj" />
 		<Project Path="tests/PoC.Pulsar.TableView.Cli.UnitTests/PoC.Pulsar.TableView.Cli.UnitTests.csproj" />
 		<Project Path="tests/PoC.Pulsar.TableView.Contracts.UnitTests/PoC.Pulsar.TableView.Contracts.UnitTests.csproj" />
 		<Project Path="tests/PoC.Pulsar.TableView.Infrastructure.Store.IntegrationTests/PoC.Pulsar.TableView.Infrastructure.Store.IntegrationTests.csproj" />

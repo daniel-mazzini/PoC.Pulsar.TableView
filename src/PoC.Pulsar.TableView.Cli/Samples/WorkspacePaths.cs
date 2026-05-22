@@ -1,4 +1,4 @@
-namespace PoC.Pulsar.TableView.Cli;
+namespace PoC.Pulsar.TableView.Cli.Samples;
 
 internal static class WorkspacePaths
 {
