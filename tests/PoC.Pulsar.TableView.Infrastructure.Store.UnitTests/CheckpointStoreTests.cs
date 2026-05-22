@@ -1,7 +1,7 @@
 using PoC.Pulsar.TableView.Infrastructure.Store;
 using Xunit;
 
-namespace PoC.Pulsar.TableView.Tests.Infrastructure.Store;
+namespace PoC.Pulsar.TableView.Infrastructure.Store.UnitTests;
 
 public sealed class CheckpointStoreTests
 {

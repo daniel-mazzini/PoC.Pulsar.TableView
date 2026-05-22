@@ -1,7 +1,17 @@
 <Solution>
-  <Project Path="src/PoC.Pulsar.TableView.AppHost/PoC.Pulsar.TableView.AppHost.csproj" />
-  <Project Path="src/PoC.Pulsar.TableView.Cli/PoC.Pulsar.TableView.Cli.csproj" />
-  <Project Path="src/PoC.Pulsar.TableView.Contracts/PoC.Pulsar.TableView.Contracts.csproj" />
-  <Project Path="src/PoC.Pulsar.TableView.Infrastructure.Store/PoC.Pulsar.TableView.Infrastructure.Store.csproj" />
-  <Project Path="tests/PoC.Pulsar.TableView.Tests/PoC.Pulsar.TableView.Tests.csproj" />
+	<Folder Name="/src/">
+		<Project Path="src/PoC.Pulsar.TableView.AppHost/PoC.Pulsar.TableView.AppHost.csproj" />
+		<Project Path="src/PoC.Pulsar.TableView.Cli/PoC.Pulsar.TableView.Cli.csproj" />
+		<Project Path="src/PoC.Pulsar.TableView.Contracts/PoC.Pulsar.TableView.Contracts.csproj" />
+		<Project Path="src/PoC.Pulsar.TableView.Infrastructure.Store/PoC.Pulsar.TableView.Infrastructure.Store.csproj" />
+		<Project Path="src/PoC.Pulsar.TableView.Processor/PoC.Pulsar.TableView.Processor.csproj" />
+	</Folder>
+	<Folder Name="/tests/">
+		<Project Path="tests/PoC.Pulsar.TableView.AppHost.UnitTests/PoC.Pulsar.TableView.AppHost.UnitTests.csproj" />
+		<Project Path="tests/PoC.Pulsar.TableView.Cli.UnitTests/PoC.Pulsar.TableView.Cli.UnitTests.csproj" />
+		<Project Path="tests/PoC.Pulsar.TableView.Contracts.UnitTests/PoC.Pulsar.TableView.Contracts.UnitTests.csproj" />
+		<Project Path="tests/PoC.Pulsar.TableView.Infrastructure.Store.IntegrationTests/PoC.Pulsar.TableView.Infrastructure.Store.IntegrationTests.csproj" />
+		<Project Path="tests/PoC.Pulsar.TableView.Infrastructure.Store.UnitTests/PoC.Pulsar.TableView.Infrastructure.Store.UnitTests.csproj" />
+		<Project Path="tests/PoC.Pulsar.TableView.Processor.UnitTests/PoC.Pulsar.TableView.Processor.UnitTests.csproj" />
+	</Folder>
 </Solution>

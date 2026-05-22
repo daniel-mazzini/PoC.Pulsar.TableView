@@ -1,0 +1,5 @@
+{
+    "appHost": {
+        "path": "src\\PoC.Pulsar.TableView.AppHost\\PoC.Pulsar.TableView.AppHost.csproj"
+    }
+}

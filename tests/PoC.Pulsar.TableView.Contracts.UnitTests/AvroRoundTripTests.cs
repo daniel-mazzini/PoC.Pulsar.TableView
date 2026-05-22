@@ -5,7 +5,7 @@ using Avro.IO;
 using PoC.Pulsar.TableView.Contracts;
 using Xunit;
 
-namespace PoC.Pulsar.TableView.Tests.Contracts;
+namespace PoC.Pulsar.TableView.Contracts.UnitTests;
 
 public sealed class AvroRoundTripTests
 {

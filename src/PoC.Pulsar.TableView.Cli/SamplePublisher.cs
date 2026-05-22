@@ -1,19 +1,20 @@
 using System.Buffers;
 using System.Reflection;
 using System.Text.Json;
-using Avro;
-using Avro.Generic;
-using Avro.IO;
+using Chr.Avro.Representation;
+using Chr.Avro.Serialization;
 using DotPulsar;
 using DotPulsar.Abstractions;
 using DotPulsar.Extensions;
 using PoC.Pulsar.TableView.Contracts;
+using BinaryWriter = Chr.Avro.Serialization.BinaryWriter;
 
 namespace PoC.Pulsar.TableView.Cli;
 
 internal sealed class SamplePublisher
 {
     private const int VersionCount = 3;
+    private static readonly BindingFlags MemberVisibility = BindingFlags.Instance | BindingFlags.Public;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -61,7 +62,7 @@ internal sealed class SamplePublisher
     private static async Task PublishRepeatedlyAsync<T>(IProducer<ReadOnlySequence<byte>> producer, IReadOnlyList<T> messages, string schemaPath, string messageType, string eventType, string topicLabel)
         where T : OfferHierarchyEntity
     {
-        var schema = (RecordSchema)Avro.Schema.Parse(await File.ReadAllTextAsync(schemaPath));
+        var serializer = await BuildSerializerAsync<T>(schemaPath);
 
         for (var messageIndex = 0; messageIndex < messages.Count; messageIndex++)
         {
@@ -70,7 +71,7 @@ internal sealed class SamplePublisher
             for (var version = 1; version <= VersionCount; version++)
             {
                 var current = CloneWithVersion(sample, version);
-                var payload = Serialize(current, schema);
+                var payload = Serialize(current, serializer);
                 var timestamp = TimestampSeed.AddMinutes(messageIndex * VersionCount + version).ToString("O");
 
                 await producer.NewMessage()
@@ -106,77 +107,24 @@ internal sealed class SamplePublisher
         return clone;
     }
 
-    private static byte[] Serialize<T>(T value, RecordSchema schema)
+    private static async Task<BinarySerializer<T>> BuildSerializerAsync<T>(string schemaPath)
         where T : class
     {
-        var record = ToRecord(value, schema);
+        var schemaJson = await File.ReadAllTextAsync(schemaPath);
+        var schema = new JsonSchemaReader((IJsonDeserializerBuilder?)null).Read(schemaJson, new JsonSchemaReaderContext());
 
+        return new BinarySerializerBuilder(MemberVisibility)
+            .BuildDelegate<T>(schema, new BinarySerializerBuilderContext(null));
+    }
+
+    private static byte[] Serialize<T>(T value, BinarySerializer<T> serializer)
+    {
         using var stream = new MemoryStream();
-        var writer = new GenericDatumWriter<GenericRecord>(schema);
-        writer.Write(record, new BinaryEncoder(stream));
+        using var writer = new BinaryWriter(stream);
+
+        serializer(value, writer);
 
         return stream.ToArray();
-    }
-
-    private static GenericRecord ToRecord(object value, RecordSchema schema)
-    {
-        var record = new GenericRecord(schema);
-        var properties = value.GetType()
-            .GetProperties(BindingFlags.Instance | BindingFlags.Public)
-            .ToDictionary(property => property.Name, property => property);
-
-        foreach (var field in schema.Fields)
-        {
-            var property = properties[field.Name];
-            record.Add(field.Name, ToAvroValue(property.GetValue(value), field.Schema));
-        }
-
-        return record;
-    }
-
-    private static object? ToAvroValue(object? value, Avro.Schema schema)
-    {
-        schema = UnwrapNullable(schema);
-
-        if (value is null)
-        {
-            return null;
-        }
-
-        return schema switch
-        {
-            RecordSchema recordSchema => ToRecord(value, recordSchema),
-            ArraySchema arraySchema => ToAvroArray(value, arraySchema),
-            _ => value
-        };
-    }
-
-    private static Array ToAvroArray(object? value, ArraySchema arraySchema)
-    {
-        var values = new List<object?>();
-        var enumerable = (System.Collections.IEnumerable?)value;
-
-        if (enumerable is null)
-        {
-            return Array.Empty<object>();
-        }
-
-        foreach (var item in enumerable)
-        {
-            values.Add(ToAvroValue(item, arraySchema.ItemSchema));
-        }
-
-        return values.ToArray();
-    }
-
-    private static Avro.Schema UnwrapNullable(Avro.Schema schema)
-    {
-        if (schema is UnionSchema unionSchema)
-        {
-            return unionSchema.Schemas.First(candidate => candidate.Tag != Avro.Schema.Type.Null);
-        }
-
-        return schema;
     }
 
     private static string BuildTopic(string @namespace, string topicName)

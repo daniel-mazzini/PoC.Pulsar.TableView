@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.IO.Pipelines;
 using DotPulsar;
 using DotPulsar.Abstractions;
 using DotPulsar.Extensions;
@@ -10,37 +11,41 @@ namespace PoC.Pulsar.TableView.Processor;
 public sealed class TaxonomyViewPublisher : ITaxonomyViewPublisher, IAsyncDisposable
 {
     private readonly IProducer<ReadOnlySequence<byte>> _producer;
-    private readonly ITaxonomyViewPublisher _publisher;
     private readonly IAvroSerializer<GeoTaxonomyMessage> _avroSerializer; // Tu serializador Avro
 
-    public TaxonomyViewPublisher(IPulsarClient client, 
-                                 string outputTopic, 
-                                 ITaxonomyViewPublisher publisher,
+    public TaxonomyViewPublisher(IPulsarClient client,
+                                 string outputTopic,
                                  IAvroSerializer<GeoTaxonomyMessage> avroSerializer)
     {
-        _publisher = publisher;
         _avroSerializer = avroSerializer;
-        
-        // Seguimos usando secuencias de bytes crudas para DotPulsar
         _producer = client.NewProducer(Schema.ByteSequence)
             .Topic(outputTopic)
             .Create();
     }
 
-    public async ValueTask PublishAsync(GeoTaxonomyMessage taxonomy, CancellationToken cancellationToken = default)
+    public async ValueTask PublishAsync(GeoTaxonomyMessage taxonomy, CancellationToken cancellationToken)
     {
-        // 1. Serializamos a Avro en lugar de JSON
-        byte[] avroBytes = _avroSerializer.Serialize(taxonomy);
-        
-        // 2. Lo pasamos al formato que DotPulsar necesita
-        var sequence = new ReadOnlySequence<byte>(avroBytes);
+        // Zero allocation serialization using PipeWriter
+        var pipe = new Pipe(new PipeOptions(pauseWriterThreshold: 0));
+        _avroSerializer.Serialize(taxonomy, pipe.Writer);
+        await pipe.Writer.CompleteAsync();
 
-        await _producer.Send(new MessageMetadata { Key = taxonomy.SportId }, sequence, cancellationToken);
+        ReadResult result = await pipe.Reader.ReadAsync(cancellationToken);
+
+        try
+        {
+            await _producer.Send(new MessageMetadata { Key = taxonomy.SportId }, result.Buffer, cancellationToken);
+        }
+        finally
+        {
+            pipe.Reader.AdvanceTo(result.Buffer.End);
+            pipe.Reader.Complete();
+        }
     }
 
-    public async ValueTask DeleteAsync(string sportId, CancellationToken cancellationToken = default)
+    public async ValueTask PublishDeleteMessageAsync(string sportId, CancellationToken cancellationToken)
     {
-        var emptySequence = new ReadOnlySequence<byte>(Array.Empty<byte>());
+        var emptySequence = new ReadOnlySequence<byte>([]);
         await _producer.Send(new MessageMetadata { Key = sportId }, emptySequence, cancellationToken);
     }
 

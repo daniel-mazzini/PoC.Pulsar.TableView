@@ -8,7 +8,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Apache.Avro" Version="1.11.3" />
+    <PackageReference Include="Chr.Avro.Binary" Version="10.13.1" />
+    <PackageReference Include="Chr.Avro.Json" Version="10.13.1" />
     <PackageReference Include="CommandLineParser" Version="2.9.1" />
     <PackageReference Include="DotPulsar" Version="5.3.1" />
   </ItemGroup>

@@ -33,8 +33,8 @@ await using var client = PulsarClient.Builder()
 var sportStore = new InMemoryStateStore<string, SportMessage>();
 var categoryStore = new InMemoryStateStore<string, RawCategoryMessage>();
 
-var sportDeserializer = new AvroMessageDeserializer<SportMessage>("SportMessage.avsc");
-var categoryDeserializer = new AvroMessageDeserializer<RawCategoryMessage>("RawCategoryMessage.avsc");
+var sportDeserializer = new DefaultAvroSerializer<SportMessage>("SportMessage.avsc");
+var categoryDeserializer = new DefaultAvroSerializer<RawCategoryMessage>("RawCategoryMessage.avsc");
 
 var sportsView = new PulsarTableView<SportMessage>(
     client,
@@ -53,6 +53,7 @@ var categoriesView = new PulsarTableView<RawCategoryMessage>(
 var processor = new GeoTaxonomyProcessor(
     sportsView,
     categoriesView,
+    new TaxonomyViewPublisher(client, BuildTopic("public/tableview-outputs", "taxonomy-view"), new DefaultAvroSerializer<GeoTaxonomyMessage>("GeoTaxonomyMessage.avsc")),
     loggerFactory.CreateLogger<GeoTaxonomyProcessor>());
 
 await processor.RunAsync(cts.Token);

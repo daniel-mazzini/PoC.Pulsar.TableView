@@ -5,12 +5,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
-    <AssemblyName>PoC.Pulsar.TableView.Tests</AssemblyName>
-    <RootNamespace>PoC.Pulsar.TableView.Tests</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Apache.Avro" Version="1.11.3" />
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="xunit" Version="2.9.0" />
@@ -22,9 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\PoC.Pulsar.TableView.Contracts\PoC.Pulsar.TableView.Contracts.csproj" />
-    <ProjectReference Include="..\..\src\PoC.Pulsar.TableView.Infrastructure.Store\PoC.Pulsar.TableView.Infrastructure.Store.csproj" />
-    <None Include="..\..\src\PoC.Pulsar.TableView.Contracts\Schemas\*.avsc" Link="Schemas\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <ProjectReference Include="..\..\src\PoC.Pulsar.TableView.Cli\PoC.Pulsar.TableView.Cli.csproj" />
   </ItemGroup>
 
 </Project>
