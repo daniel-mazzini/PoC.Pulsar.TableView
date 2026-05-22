@@ -18,6 +18,7 @@ internal readonly record struct TableViewMessage(string? Key, ReadOnlySequence<b
 public sealed class PulsarTableView<TValue> : IPulsarTableView<TValue>
     where TValue : class
 {
+    private static readonly TimeSpan HighWatermarkLookupTimeout = TimeSpan.FromSeconds(30);
     private readonly IStateStore<string, TValue> _stateStore;
     private readonly Func<ReadOnlySequence<byte>, TValue> _valueDeserializer;
     private readonly Func<CancellationToken, ValueTask<IReadOnlyDictionary<int, PulsarMessageId>>> _getHighWatermarks;
@@ -67,7 +68,24 @@ public sealed class PulsarTableView<TValue> : IPulsarTableView<TValue>
 
     public async Task StartBootstrapAsync(CancellationToken cancellationToken = default)
     {
-        var targetWatermarks = await _getHighWatermarks(cancellationToken);
+        _logger.LogInformation("Resolving high-watermarks for topic {Topic}.", _topic);
+
+        using var highWatermarkCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        highWatermarkCts.CancelAfter(HighWatermarkLookupTimeout);
+
+        IReadOnlyDictionary<int, PulsarMessageId> targetWatermarks;
+
+        try
+        {
+            targetWatermarks = await _getHighWatermarks(highWatermarkCts.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && highWatermarkCts.IsCancellationRequested)
+        {
+            throw new TimeoutException(
+                $"Timed out resolving high-watermarks for topic {_topic} after {HighWatermarkLookupTimeout}. Check Pulsar broker connectivity and advertised listener configuration.");
+        }
+
+        _logger.LogInformation("Resolved {PartitionCount} high-watermark(s) for topic {Topic}.", targetWatermarks.Count, _topic);
 
         if (targetWatermarks.Count == 0)
         {
@@ -170,7 +188,10 @@ public sealed class PulsarTableView<TValue> : IPulsarTableView<TValue>
 
         foreach (var messageId in messageIds)
         {
-            watermarks[messageId.Partition] = ToPulsarMessageId(messageId);
+            if (TryToPulsarMessageId(messageId, out var watermark))
+            {
+                watermarks[messageId.Partition] = watermark;
+            }
         }
 
         return watermarks;
@@ -227,7 +248,27 @@ public sealed class PulsarTableView<TValue> : IPulsarTableView<TValue>
     }
 
     private static PulsarMessageId ToPulsarMessageId(MessageId messageId)
-        => new(checked((long)messageId.LedgerId), checked((long)messageId.EntryId), messageId.Partition);
+    {
+        if (TryToPulsarMessageId(messageId, out var pulsarMessageId))
+        {
+            return pulsarMessageId;
+        }
+
+        throw new InvalidOperationException(
+            $"Unsupported Pulsar message id {messageId.LedgerId}:{messageId.EntryId}:{messageId.Partition}.");
+    }
+
+    private static bool TryToPulsarMessageId(MessageId messageId, out PulsarMessageId pulsarMessageId)
+    {
+        if (messageId.LedgerId > long.MaxValue || messageId.EntryId > long.MaxValue)
+        {
+            pulsarMessageId = default;
+            return false;
+        }
+
+        pulsarMessageId = new PulsarMessageId((long)messageId.LedgerId, (long)messageId.EntryId, messageId.Partition);
+        return true;
+    }
 
     private static MessageId ToDotPulsarMessageId(PulsarMessageId messageId, string topic)
         => new(checked((ulong)messageId.LedgerId), checked((ulong)messageId.EntryId), messageId.PartitionIndex, -1, topic);

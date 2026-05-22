@@ -25,21 +25,20 @@ public sealed class TaxonomyViewPublisher : ITaxonomyViewPublisher, IAsyncDispos
 
     public async ValueTask PublishAsync(GeoTaxonomyMessage taxonomy, CancellationToken cancellationToken)
     {
-        // Zero allocation serialization using PipeWriter
-        var pipe = new Pipe(new PipeOptions(pauseWriterThreshold: 0));
-        _avroSerializer.Serialize(taxonomy, pipe.Writer);
-        await pipe.Writer.CompleteAsync();
-
-        ReadResult result = await pipe.Reader.ReadAsync(cancellationToken);
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(65536);
 
         try
         {
-            await _producer.Send(new MessageMetadata { Key = taxonomy.SportId }, result.Buffer, cancellationToken);
+            using var stream = new MemoryStream(buffer);
+            _avroSerializer.Serialize(taxonomy, stream);
+            int bytesWritten = (int)stream.Position;
+            ReadOnlyMemory<byte> validMemory = buffer.AsMemory(0, bytesWritten);
+            var sequence = new ReadOnlySequence<byte>(validMemory);
+            await _producer.Send(new MessageMetadata { Key = taxonomy.SportId }, sequence, cancellationToken);
         }
         finally
         {
-            pipe.Reader.AdvanceTo(result.Buffer.End);
-            pipe.Reader.Complete();
+            ArrayPool<byte>.Shared.Return(buffer);
         }
     }
 
