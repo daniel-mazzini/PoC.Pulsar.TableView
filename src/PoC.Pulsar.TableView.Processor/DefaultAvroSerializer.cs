@@ -52,7 +52,7 @@ internal sealed class DefaultAvroSerializer<T> : IAvroSerializer<T>
 
         _serializer(obj, writer);
 
-        return stream.ToArray();
+        return stream.GetBuffer();
     }
 
     /// <summary>
@@ -64,7 +64,11 @@ internal sealed class DefaultAvroSerializer<T> : IAvroSerializer<T>
     public void Serialize(T value, PipeWriter writer)
     {
         using var stream = writer.AsStream();
-        var avroWriter = new BinaryWriter(stream);
-        _serializer(value, avroWriter);
+        _serializer(value, new BinaryWriter(stream));
+    }
+
+    public void Serialize(T value, Stream stream)
+    {
+        _serializer(value, new BinaryWriter(stream));
     }
 }

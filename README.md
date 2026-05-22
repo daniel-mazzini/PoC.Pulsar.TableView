@@ -40,8 +40,8 @@ http://localhost:8090
 Run the CLI directly:
 
 ```powershell
-$env:PULSAR_SERVICE_URL = "pulsar://localhost:6650"
-$env:PULSAR_INPUT_NAMESPACE = "public/tableview-inputs"
+$env:Pulsar__ServiceUrl = "pulsar://localhost:6650"
+$env:Pulsar__InputNamespace = "public/tableview-inputs"
 dotnet run --project .\src\PoC.Pulsar.TableView.Cli\PoC.Pulsar.TableView.Cli.csproj -- publish-sample
 ```
 
@@ -54,3 +54,51 @@ dotnet run --project .\src\PoC.Pulsar.TableView.AppHost\PoC.Pulsar.TableView.App
 ```
 
 The CLI reads the JSON files from `samples\publish`, writes Avro payloads to the input topics, and republishes each sample three times with the same key and increasing `Version` values.
+
+## Run serialization benchmarks
+
+The repository includes BenchmarkDotNet benchmarks for the serialization paths in `DefaultAvroSerializer<T>`:
+
+- `Serialize(T obj)`, which returns a `byte[]`
+- `Serialize(T obj, PipeWriter writer)`, used by the processor publish flow
+- `Serialize(T obj, Stream stream)`, used with a rented `ArrayPool<byte>` buffer
+- `Serialize(T obj, Stream stream)`, used with `RecyclableMemoryStream.GetReadOnlySequence()`
+
+Build the benchmark project in Release mode:
+
+```powershell
+dotnet build .\benchmarks\PoC.Pulsar.TableView.Processor.Benchmarks\PoC.Pulsar.TableView.Processor.Benchmarks.csproj -c Release
+```
+
+Run all benchmarks:
+
+```powershell
+dotnet run -c Release --project .\benchmarks\PoC.Pulsar.TableView.Processor.Benchmarks\PoC.Pulsar.TableView.Processor.Benchmarks.csproj
+```
+
+To run only the Avro serialization benchmarks:
+
+```powershell
+dotnet run -c Release --project .\benchmarks\PoC.Pulsar.TableView.Processor.Benchmarks\PoC.Pulsar.TableView.Processor.Benchmarks.csproj -- --filter *AvroSerializationBenchmarks*
+```
+
+The benchmark output includes:
+
+- execution time
+- allocated bytes per operation
+- Gen0, Gen1, and Gen2 collections
+- comparison between the `byte[]`, `PipeWriter`, `Stream` with `ArrayPool<byte>`, and `RecyclableMemoryStream` paths
+- stress scenarios using different `GeoTaxonomyMessage` category counts
+
+BenchmarkDotNet writes detailed reports under:
+
+```powershell
+.\BenchmarkDotNet.Artifacts\
+```
+
+For reliable numbers:
+
+- close unnecessary applications before running
+- use `-c Release`
+- avoid debugging while benchmarks run
+- compare results from the same machine

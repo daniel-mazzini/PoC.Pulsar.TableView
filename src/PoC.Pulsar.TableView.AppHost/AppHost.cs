@@ -49,8 +49,8 @@ builder.AddExecutable(
         "src/PoC.Pulsar.TableView.Cli/PoC.Pulsar.TableView.Cli.csproj",
         "--",
         "publish-sample")
-    .WithEnvironment("PULSAR_SERVICE_URL", "pulsar://127.0.0.1:6650")
-    .WithEnvironment("PULSAR_INPUT_NAMESPACE", "public/tableview-inputs")
+    .WithEnvironment("Pulsar__ServiceUrl", "pulsar://127.0.0.1:6650")
+    .WithEnvironment("Pulsar__InputNamespace", "public/tableview-inputs")
     .WaitForCompletion(pulsarInit)
     .WithExplicitStart();
 

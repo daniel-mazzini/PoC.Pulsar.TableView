@@ -161,7 +161,8 @@ public sealed class PulsarTableView<TValue> : IPulsarTableView<TValue>
     {
         await using var reader = client.NewReader(Schema.ByteSequence)
             .Topic(topic)
-            .StartMessageId(MessageId.Latest)
+            .StartMessageId(MessageId.Earliest)
+            //.ReadCompacted(true)
             .Create();
 
         var messageIds = await reader.GetLastMessageIds(cancellationToken);

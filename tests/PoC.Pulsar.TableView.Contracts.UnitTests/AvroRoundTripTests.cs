@@ -1,14 +1,16 @@
-using System.Reflection;
-using Avro;
-using Avro.Generic;
-using Avro.IO;
+using Chr.Avro.Representation;
+using Chr.Avro.Serialization;
 using PoC.Pulsar.TableView.Contracts;
 using Xunit;
+using BinaryReader = Chr.Avro.Serialization.BinaryReader;
+using BinaryWriter = Chr.Avro.Serialization.BinaryWriter;
 
 namespace PoC.Pulsar.TableView.Contracts.UnitTests;
 
 public sealed class AvroRoundTripTests
 {
+    private static readonly System.Reflection.BindingFlags MemberVisibility = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public;
+
     [Fact]
     public void sport_message_round_trips_base_properties()
     {
@@ -114,180 +116,68 @@ public sealed class AvroRoundTripTests
         var sportSchema = ParseSchema("SportMessage.avsc");
         var categorySchema = ParseSchema("RawCategoryMessage.avsc");
 
-        Assert.Contains(sportSchema.Fields, field => field.Name == nameof(Entity.Id));
-        Assert.Contains(sportSchema.Fields, field => field.Name == nameof(OfferHierarchyEntity.Name));
-        Assert.Contains(sportSchema.Fields, field => field.Name == nameof(OfferHierarchyEntity.Version));
-        Assert.Contains(sportSchema.Fields, field => field.Name == nameof(SportMessage.SportType));
+        Assert.True(SchemaHasField(sportSchema, nameof(Entity.Id)));
+        Assert.True(SchemaHasField(sportSchema, nameof(OfferHierarchyEntity.Name)));
+        Assert.True(SchemaHasField(sportSchema, nameof(OfferHierarchyEntity.Version)));
+        Assert.True(SchemaHasField(sportSchema, nameof(SportMessage.SportType)));
 
-        Assert.Contains(categorySchema.Fields, field => field.Name == nameof(Entity.Id));
-        Assert.Contains(categorySchema.Fields, field => field.Name == nameof(OfferHierarchyEntity.Name));
-        Assert.Contains(categorySchema.Fields, field => field.Name == nameof(OfferHierarchyEntity.Version));
-        Assert.Contains(categorySchema.Fields, field => field.Name == nameof(RawCategoryMessage.SportId));
+        Assert.True(SchemaHasField(categorySchema, nameof(Entity.Id)));
+        Assert.True(SchemaHasField(categorySchema, nameof(OfferHierarchyEntity.Name)));
+        Assert.True(SchemaHasField(categorySchema, nameof(OfferHierarchyEntity.Version)));
+        Assert.True(SchemaHasField(categorySchema, nameof(RawCategoryMessage.SportId)));
     }
 
     private static T RoundTrip<T>(T value, string schemaFileName)
         where T : class, new()
     {
-        var schema = ParseSchema(schemaFileName);
-        var record = ToRecord(value, schema);
+        var schemaJson = ReadSchemaJson(schemaFileName);
+        var schema = new JsonSchemaReader((IJsonDeserializerBuilder?)null).Read(schemaJson, new JsonSchemaReaderContext());
+        var serializer = new BinarySerializerBuilder(MemberVisibility)
+            .BuildDelegate<T>(schema, new BinarySerializerBuilderContext(null));
+        var deserializer = new BinaryDeserializerBuilder(MemberVisibility)
+            .BuildDelegate<T>(schema, new BinaryDeserializerBuilderContext(null));
 
         using var stream = new MemoryStream();
-        var writer = new GenericDatumWriter<GenericRecord>(schema);
-        var encoder = new BinaryEncoder(stream);
-        writer.Write(record, encoder);
+        using var writer = new BinaryWriter(stream);
+        serializer(value, writer);
 
         stream.Position = 0;
-        var reader = new GenericDatumReader<GenericRecord>(schema, schema);
-        var decoder = new BinaryDecoder(stream);
-        var decoded = reader.Read(null!, decoder);
+        var reader = new BinaryReader(stream.ToArray());
 
-        return FromRecord<T>(decoded, schema);
+        return deserializer(ref reader);
     }
 
-    private static RecordSchema ParseSchema(string schemaFileName)
+    private static object ParseSchema(string schemaFileName)
+    {
+        var schemaJson = ReadSchemaJson(schemaFileName);
+
+        return new JsonSchemaReader((IJsonDeserializerBuilder?)null).Read(schemaJson, new JsonSchemaReaderContext());
+    }
+
+    private static string ReadSchemaJson(string schemaFileName)
     {
         var schemaPath = Path.Combine(AppContext.BaseDirectory, "Schemas", schemaFileName);
-        var schemaJson = File.ReadAllText(schemaPath);
 
-        return (RecordSchema)Schema.Parse(schemaJson);
+        return File.ReadAllText(schemaPath);
     }
 
-    private static GenericRecord ToRecord(object value, RecordSchema schema)
+    private static bool SchemaHasField(object schema, string fieldName)
     {
-        var record = new GenericRecord(schema);
-        var properties = value.GetType()
-            .GetProperties(BindingFlags.Instance | BindingFlags.Public)
-            .ToDictionary(property => property.Name, property => property);
+        var fieldsProperty = schema.GetType().GetProperty("Fields")
+            ?? throw new InvalidOperationException("Schema does not expose fields.");
+        var fields = (System.Collections.IEnumerable)fieldsProperty.GetValue(schema)!;
 
-        foreach (var field in schema.Fields)
+        foreach (var field in fields)
         {
-            var property = properties[field.Name];
-            record.Add(field.Name, ToAvroValue(property.GetValue(value), field.Schema));
+            var nameProperty = field.GetType().GetProperty("Name")
+                ?? throw new InvalidOperationException("Schema field does not expose a name.");
+
+            if (Equals(nameProperty.GetValue(field), fieldName))
+            {
+                return true;
+            }
         }
 
-        return record;
-    }
-
-    private static object? ToAvroValue(object? value, Schema schema)
-    {
-        schema = UnwrapNullable(schema);
-
-        return schema switch
-        {
-            RecordSchema recordSchema => ToRecord(value!, recordSchema),
-            ArraySchema arraySchema => ToAvroArray(value, arraySchema),
-            _ => value
-        };
-    }
-
-    private static Array ToAvroArray(object? value, ArraySchema arraySchema)
-    {
-        var values = new List<object?>();
-        var enumerable = (System.Collections.IEnumerable?)value;
-
-        if (enumerable is null)
-        {
-            return Array.Empty<object>();
-        }
-
-        foreach (var item in enumerable)
-        {
-            values.Add(ToAvroValue(item, arraySchema.ItemSchema));
-        }
-
-        return values.ToArray();
-    }
-
-    private static T FromRecord<T>(GenericRecord record, RecordSchema schema)
-        where T : class, new()
-    {
-        var instance = new T();
-        var properties = typeof(T)
-            .GetProperties(BindingFlags.Instance | BindingFlags.Public)
-            .ToDictionary(property => property.Name, property => property);
-
-        foreach (var field in schema.Fields)
-        {
-            var property = properties[field.Name];
-            var value = FromAvroValue(record[field.Name], field.Schema, property.PropertyType);
-            property.SetValue(instance, value);
-        }
-
-        return instance;
-    }
-
-    private static object? FromAvroValue(object? value, Schema schema, Type targetType)
-    {
-        schema = UnwrapNullable(schema);
-
-        if (value is null)
-        {
-            return null;
-        }
-
-        return schema switch
-        {
-            RecordSchema recordSchema => FromRecord(value, recordSchema, targetType),
-            ArraySchema arraySchema => FromAvroArray(value, arraySchema, targetType),
-            _ => value
-        };
-    }
-
-    private static object FromRecord(object value, RecordSchema schema, Type targetType)
-    {
-        var instance = Activator.CreateInstance(targetType)
-            ?? throw new InvalidOperationException($"Could not create {targetType.FullName}.");
-
-        var properties = targetType
-            .GetProperties(BindingFlags.Instance | BindingFlags.Public)
-            .ToDictionary(property => property.Name, property => property);
-
-        foreach (var field in schema.Fields)
-        {
-            var property = properties[field.Name];
-            var fieldValue = ((GenericRecord)value)[field.Name];
-            property.SetValue(instance, FromAvroValue(fieldValue, field.Schema, property.PropertyType));
-        }
-
-        return instance;
-    }
-
-    private static object FromAvroArray(object value, ArraySchema arraySchema, Type targetType)
-    {
-        var elementType = targetType.IsArray
-            ? targetType.GetElementType()!
-            : targetType.GetGenericArguments().Single();
-
-        var listType = typeof(List<>).MakeGenericType(elementType);
-        var list = (System.Collections.IList)Activator.CreateInstance(listType)!;
-
-        foreach (var item in (System.Collections.IEnumerable)value)
-        {
-            list.Add(FromAvroValue(item, arraySchema.ItemSchema, elementType));
-        }
-
-        return targetType.IsArray ? ToArray(list, elementType) : list;
-    }
-
-    private static object ToArray(System.Collections.IList list, Type elementType)
-    {
-        var array = Array.CreateInstance(elementType, list.Count);
-
-        for (var i = 0; i < list.Count; i++)
-        {
-            array.SetValue(list[i], i);
-        }
-
-        return array;
-    }
-
-    private static Schema UnwrapNullable(Schema schema)
-    {
-        if (schema is UnionSchema unionSchema)
-        {
-            return unionSchema.Schemas.First(candidate => candidate.Tag != Schema.Type.Null);
-        }
-
-        return schema;
+        return false;
     }
 }

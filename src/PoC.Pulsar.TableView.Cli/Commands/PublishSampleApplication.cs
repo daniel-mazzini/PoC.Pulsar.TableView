@@ -19,10 +19,10 @@ internal sealed class PublishSampleApplication
             return 1;
         }
 
-        return Parser.Default.ParseArguments<PublishSampleVerb>(args)
+        return Parser.Default.ParseArguments(args, typeof(PublishSampleVerb))
             .MapResult(
-                _ => RunPublishSample(),
-                errors => errors.All(error => error.Tag is ErrorType.HelpRequestedError or ErrorType.VersionRequestedError) ? 0 : 1);
+                (PublishSampleVerb _) => RunPublishSample(),
+                errors => errors.All(error => error.Tag is ErrorType.HelpRequestedError or ErrorType.HelpVerbRequestedError or ErrorType.VersionRequestedError) ? 0 : 1);
     }
 
     private int RunPublishSample()

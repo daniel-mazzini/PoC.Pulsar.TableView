@@ -13,7 +13,11 @@ internal static class CliHost
 {
     public static IHost Create(string[] args)
     {
-        var builder = Host.CreateApplicationBuilder(args);
+        var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
+        {
+            Args = args,
+            ContentRootPath = AppContext.BaseDirectory
+        });
 
         builder.Logging.ClearProviders();
         builder.Logging.AddSimpleConsole(options =>
