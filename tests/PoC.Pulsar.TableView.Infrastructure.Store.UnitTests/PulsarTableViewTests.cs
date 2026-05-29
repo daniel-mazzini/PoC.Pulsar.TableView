@@ -2,7 +2,8 @@ using System.Buffers;
 using System.Text;
 using DotPulsar;
 using Microsoft.Extensions.Logging;
-using PoC.Pulsar.TableView.Infrastructure.Store;
+using PoC.Pulsar.TableView.Domain.Storages;
+using PoC.Pulsar.TableView.Infrastructure.Store.Readers;
 using Xunit;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.UnitTests;
@@ -31,8 +32,8 @@ public sealed class PulsarTableViewTests
         await view.StartBootstrapAsync();
 
         Assert.Equal(3, processedMessages);
-        Assert.Null(view.Get("sport-1"));
-        Assert.Equal("Tennis", view.Get("sport-2"));
+        Assert.Null(view.GetAsync("sport-1"));
+        Assert.Equal("Tennis", view.GetAsync("sport-2"));
         Assert.Single(await ToListAsync(view.GetAllAsync()));
         Assert.Equal(new PulsarMessageId(1, 3, 0), store.GetLastCheckpoint());
         Assert.Contains(logger.Messages, message => message.Contains("Starting bootstrap", StringComparison.Ordinal));
@@ -110,7 +111,7 @@ public sealed class PulsarTableViewTests
 
         await view.StartBootstrapAsync();
 
-        Assert.Equal("Tennis", view.Get("sport-2"));
+        Assert.Equal("Tennis", view.GetAsync("sport-2"));
         Assert.Single(await ToListAsync(view.GetAllAsync()));
         Assert.Contains(logger.Messages, message => message.Contains("Skipping message without key", StringComparison.Ordinal));
 
@@ -144,7 +145,7 @@ public sealed class PulsarTableViewTests
 
         await view.StartBootstrapAsync();
 
-        Assert.Equal("Football", view.Get("sport-1"));
+        Assert.Equal("Football", view.GetAsync("sport-1"));
         Assert.Equal(new PulsarMessageId(2, 1, 0), store.GetLastCheckpoint());
         Assert.Contains(logger.Messages, message => message.Contains("Bootstrap successfully completed", StringComparison.Ordinal));
 
@@ -185,15 +186,15 @@ public sealed class PulsarTableViewTests
         Assert.NotNull(capturedStartMessageId);
         Assert.Equal((ulong)7, capturedStartMessageId!.LedgerId);
         Assert.Equal((ulong)11, capturedStartMessageId.EntryId);
-        Assert.Equal("Volleyball", view.Get("sport-2"));
-        Assert.Null(view.Get("sport-1"));
+        Assert.Equal("Volleyball", view.GetAsync("sport-2"));
+        Assert.Null(view.GetAsync("sport-1"));
         Assert.Equal(new PulsarMessageId(7, 13, 0), store.GetLastCheckpoint());
 
         var update = Assert.IsType<UpdateEvent<string>>(events[0]);
         Assert.Equal("sport-2", update.Key);
         Assert.Equal("Volleyball", update.NewValue);
 
-        var delete = Assert.IsType<DeleteEvent<string>>(events[1]);
+        var delete = Assert.IsType<EventDeleted<string>>(events[1]);
         Assert.Equal("sport-1", delete.Key);
 
         async IAsyncEnumerable<TableViewMessage> BootstrapMessagesAsync(

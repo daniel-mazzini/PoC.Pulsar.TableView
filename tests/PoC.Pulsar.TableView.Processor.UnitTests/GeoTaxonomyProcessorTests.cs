@@ -1,8 +1,8 @@
 using System.Reactive.Subjects;
 using Microsoft.Extensions.Logging.Abstractions;
 using PoC.Pulsar.TableView.Contracts;
-using PoC.Pulsar.TableView.Infrastructure.Store;
-using PoC.Pulsar.TableView.Infrastructure.Store.Abstractions;
+using PoC.Pulsar.TableView.Domain.Storages;
+using PoC.Pulsar.TableView.Processor.Abstraction.Publisher;
 using Xunit;
 
 namespace PoC.Pulsar.TableView.Processor.UnitTests;
@@ -67,7 +67,7 @@ public sealed class GeoTaxonomyProcessorTests
         sports.EmitUpdate("sport-1", Sport("sport-1", "Soccer", "SOCCER"));
         var taxonomy = await publisher.WaitForPublishedCountAsync(1);
 
-        Assert.Equal(["ES", "US"], taxonomy[0].GeoCategories.Select(category => category.CountryCode));
+        Assert.Equal(["ES", "US"], taxonomy[0].GeoCategories.Select(category => category.CountryCode).OrderBy(code => code));
     }
 
     [Fact]
@@ -270,15 +270,17 @@ public sealed class GeoTaxonomyProcessorTests
             _items.Remove(key);
         }
 
-        public void EmitUpdate(string key, T value)
+        public void EmitUpdate(string key, T value, T oldValue)
         {
-            _updates.OnNext(new UpdateEvent<T>(key, value));
+            _updates.OnNext(new EventUpdated<T>(key, value, oldValue));
         }
 
-        public void EmitDelete(string key)
+        public void EmitDelete(string key, T value)
         {
-            _updates.OnNext(new DeleteEvent<T>(key));
+            _updates.OnNext(new EventDeleted<T>(key,value));
         }
+
+        
     }
 
     private sealed class FakeTaxonomyViewPublisher : ITaxonomyViewPublisher
@@ -286,11 +288,11 @@ public sealed class GeoTaxonomyProcessorTests
         private readonly object _gate = new();
         private TaskCompletionSource _changed = NewCompletionSource();
 
-        public List<GeoTaxonomyMessage> PublishedTaxonomies { get; } = [];
+        public List<GeoTaxonomyViewMessage> PublishedTaxonomies { get; } = [];
 
         public List<string> DeletedSportIds { get; } = [];
 
-        public ValueTask PublishAsync(GeoTaxonomyMessage taxonomy, CancellationToken cancellationToken)
+        public ValueTask PublishAsync(GeoTaxonomyViewMessage taxonomy, CancellationToken cancellationToken)
         {
             lock (_gate)
             {
@@ -314,7 +316,7 @@ public sealed class GeoTaxonomyProcessorTests
             return ValueTask.CompletedTask;
         }
 
-        public async Task<IReadOnlyList<GeoTaxonomyMessage>> WaitForPublishedCountAsync(int expectedCount)
+        public async Task<IReadOnlyList<GeoTaxonomyViewMessage>> WaitForPublishedCountAsync(int expectedCount)
         {
             while (true)
             {

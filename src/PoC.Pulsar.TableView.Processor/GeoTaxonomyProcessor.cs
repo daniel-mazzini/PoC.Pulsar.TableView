@@ -1,51 +1,61 @@
-using System.Text.Json;
-using System.Reactive.Linq;
 using Microsoft.Extensions.Logging;
 using PoC.Pulsar.TableView.Contracts;
-using PoC.Pulsar.TableView.Infrastructure.Store;
-using PoC.Pulsar.TableView.Infrastructure.Store.Abstractions;
+using PoC.Pulsar.TableView.Domain.Entities.Categories;
+using PoC.Pulsar.TableView.Domain.Entities.Sports;
+using PoC.Pulsar.TableView.Domain.Filter;
+using PoC.Pulsar.TableView.Domain.Storages;
+using PoC.Pulsar.TableView.Domain.Storages.Indexes;
+using PoC.Pulsar.TableView.Domain.Storages.MaterializeViews;
+using PoC.Pulsar.TableView.Infrastructure.Store.Publisher;
+using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Reactive.Linq;
+using System.Text.Json;
 
 namespace PoC.Pulsar.TableView.Processor;
 
 internal sealed class GeoTaxonomyProcessor
 {
-    private readonly IPulsarTableView<SportMessage> _sportsTableView;
+    private readonly ICategoryBySportIndex _relationIndex;
     private readonly IPulsarTableView<RawCategoryMessage> _categoriesTableView;
     private readonly ILogger<GeoTaxonomyProcessor> _logger;
+    private readonly IOrphanCategoryBySportIndex _pendingIndex;
+    private readonly IPulsarTableView<SportMessage> _sportsTableView;
     private readonly ITaxonomyViewPublisher _taxonomyPublisher;
-
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _categoryToSportId = new(StringComparer.Ordinal);
-
+    private readonly IGeoTaxonomyViewStorage _materializeViewStorage;
+    private readonly ConcurrentDictionary<SportId, GeoTaxonomyViewMessage> _lastView;
     public GeoTaxonomyProcessor(IPulsarTableView<SportMessage> sportsTableView,
                                 IPulsarTableView<RawCategoryMessage> categoriesTableView,
                                 ITaxonomyViewPublisher taxonomyPublisher,
+                                ICategoryBySportIndex relationIndex,
+                                IOrphanCategoryBySportIndex pendingIndex,
+                                IGeoTaxonomyViewStorage materializeViewStorage,
                                 ILogger<GeoTaxonomyProcessor> logger)
-            => (_sportsTableView, _categoriesTableView, _logger, _taxonomyPublisher) = (sportsTableView, categoriesTableView, logger, taxonomyPublisher);
+        => (_sportsTableView, _categoriesTableView, _taxonomyPublisher, _relationIndex, _pendingIndex, _materializeViewStorage, _logger)
+            = (sportsTableView, categoriesTableView, taxonomyPublisher, relationIndex, pendingIndex, materializeViewStorage, logger);
+
 
     public async Task RunAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("Bootstrapping sports and categories table views.");
         // the bootstrap methods does not listing any events. We load all the topic compacted messages up to the latest without processing any update until both views are bootstrapped,
         // then we load the category index and build the initial snapshot from the source of truth (the table views) to ensure we don't have
-        await Task.WhenAll(_sportsTableView.StartBootstrapAsync(cancellationToken), _categoriesTableView.StartBootstrapAsync(cancellationToken));
-
-        await LoadCategoryIndexAsync(cancellationToken);
-        var snapshot = await BuildSnapshotAsync(cancellationToken);
-        _logger.LogInformation("Initial taxonomy snapshot:{NewLine}{Snapshot}", Environment.NewLine, ToJson(snapshot));
+        await _sportsTableView.StartBootstrapAsync(cancellationToken);
+        await _categoriesTableView.StartBootstrapAsync(cancellationToken);
+        await BuildSnapshotAsync(cancellationToken);
 
         using var sportsSubscription = _sportsTableView.OnUpdate
-                                                        .Select(@event => Observable.FromAsync(ct => OnSportUpdateAsync(@event, ct)))
+                                                        .Select(@event => Observable.FromAsync(ct => OnSportChangeAsync(@event, ct)))
                                                         .Concat()
-                                                        
-                                                        .Subscribe( onNext: _ => { },
+                                                        .Subscribe(onNext: _ => { },
                                                                     exception => _logger.LogError(exception, "Error processing sport update."));
-        
+
 
         using var categoriesSubscription = _categoriesTableView.OnUpdate
-                                                        .Select(@event => Observable.FromAsync(ct => OnCategoryUpdateAsync(@event, ct)))
+                                                        .Select(@event => Observable.FromAsync(ct => OnCategoryChangeAsync(@event, ct)))
                                                         .Concat()
                                                         // replace Concat with Merge() or Merge(maxConcurrency) if you want to process category updates in parallel
-                                                        .Subscribe( onNext: _ => { },
+                                                        .Subscribe(onNext: _ => { },
                                                                     exception => _logger.LogError(exception, "Error processing category update."));
 
         _logger.LogInformation("Starting live tail for both table views.");
@@ -60,140 +70,229 @@ internal sealed class GeoTaxonomyProcessor
         }
     }
 
-    private async Task LoadCategoryIndexAsync(CancellationToken cancellationToken)
-    {
-        _categoryToSportId.Clear();
 
-        //using var timeoutCts = new CancellationTokenSource(TimeSpan.FromMinutes(1));
-        //await foreach (var category in _categoriesTableView.GetAllAsync(cancellationToken).WithCancellation(timeoutCts.Token))
-        await foreach (var category in _categoriesTableView.GetAllAsync(cancellationToken).WithCancellation(cancellationToken))
+
+    private static string ToJson<T>(T value) => JsonSerializer.Serialize(value, new JsonSerializerOptions { WriteIndented = true });
+
+    private async ValueTask BuildSnapshotAsync(CancellationToken cancellationToken)
+    {
+        // 1. Read all the sports
+        var sports = _sportsTableView.GetLoadedOnBoostrap();
+
+        // 2. Read all the categories where Country Code is not null to build the category-sport index and detect pending categories without sport
+        IDictionary<string, RawCategoryMessage> countryCategories = _categoriesTableView.GetLoadedOnBoostrapFilterBy(new GeoCategoryMessageFilter());
+        foreach (var category in countryCategories.Values)
         {
-            _categoryToSportId[category.Id] = category.SportId;
+            var sportId = new SportId(category.SportId);
+            var categoryId = new CategoryId(category.Id);
+            await _relationIndex.AddCategorybySportAsync(sportId, categoryId, cancellationToken);
+            if (!sports.ContainsKey(category.SportId))
+                await _pendingIndex.AddOrphanCategorybySportAsync(sportId, categoryId, cancellationToken);
         }
+
+        List<GeoTaxonomyViewMessage> createViewList = new (capacity: sports.Values.Count);
+        foreach (var sport in sports.Values)
+        {
+            var sportId = new SportId(sport.Id);
+            var categoriesIds = await _relationIndex.GetCategoriesBySport(sportId, cancellationToken);
+            var sportCategories = await FilterCategoriesForGeoViewAsync(categoriesIds, countryCategories, cancellationToken);
+            var view = GeoTaxonomyViewMessage.Create(sport, sportCategories);
+            createViewList.Add(view);
+            _materializeViewStorage.AddTaxonomyView(sportId, view);
+        }
+
+        await _taxonomyPublisher.PublishListMessage(createViewList, cancellationToken);
     }
 
-    private async Task<IReadOnlyList<GeoTaxonomyMessage>> BuildSnapshotAsync(CancellationToken cancellationToken)
+    
+    private async Task<List<GeoTaxonomyNode>> FilterCategoriesForGeoViewAsync(IReadOnlySet<CategoryId> categoriesIds, IDictionary<string,RawCategoryMessage> countryCategories, CancellationToken cancellationToken)
     {
-        var categories = new List<RawCategoryMessage>();
-
-        // 1. First we read all the categories
-        await foreach (var category in _categoriesTableView.GetAllAsync(cancellationToken).WithCancellation(cancellationToken))
+        List<GeoTaxonomyNode> nodes = new(categoriesIds.Count);
+        foreach (var categoryId in categoriesIds)
         {
-            categories.Add(category);
-        }
-
-        // 2. We create the ultra-fast in-memory index
-        var categoriesBySport = categories.ToLookup(category => category.SportId, StringComparer.Ordinal);
-
-        var snapshot = new List<GeoTaxonomyMessage>();
-
-        // 3. We read the sports and build the taxonomy at the same time
-        await foreach (var sport in _sportsTableView.GetAllAsync(cancellationToken).WithCancellation(cancellationToken))
-        {
-            // categoriesBySport[sport.Id] devuelve vacío si no hay categorías, no tira excepción
-            var taxonomy = BuildTaxonomy(sport, categoriesBySport[sport.Id]);
-            snapshot.Add(taxonomy);
-        }
-
-        // 4. Ordenamos la vista final resultante y la devolvemos
-        return [.. snapshot.OrderBy(taxonomy => taxonomy.SportId, StringComparer.Ordinal)];
-    }
-
-    private static GeoTaxonomyMessage BuildTaxonomy(SportMessage sport, IEnumerable<RawCategoryMessage> sportCategories)
-        => new()
-        {
-            SportId = sport.Id,
-            SportName = sport.Name,
-            SportType = sport.SportType,
-            GeoCategories = [.. sportCategories
-                            .Where(category => !string.IsNullOrWhiteSpace(category.CountryCode))
-                            .Select(category => category.CountryCode!)
-                            .Distinct(StringComparer.Ordinal)
-                            .OrderBy(countryCode => countryCode, StringComparer.Ordinal)
-                            .Select(countryCode => new GeoTaxonomyNode{CountryCode = countryCode})]
-        };
-
-    private async Task OnSportUpdateAsync(Event<SportMessage> @event, CancellationToken cancellationToken)
-    {
-        switch (@event)
-        {
-            case UpdateEvent<SportMessage> update:
-                _logger.LogInformation("Sports live update for key {Key}:{NewLine}{Payload}",
-                                       update.Key,
-                                       Environment.NewLine,
-                                       ToJson(update.NewValue));
-                await PublishTaxonomyForSportAsync(update.Key, "sport update", cancellationToken);
-                break;
-
-            case DeleteEvent<SportMessage> delete:
-                _logger.LogInformation("Sports live delete for key {Key}.",
-                                       delete.Key);
-                await PublishTaxonomyForSportAsync(delete.Key, "sport delete", cancellationToken);
-                break;
-        }
-    }
-
-    private async Task OnCategoryUpdateAsync(Event<RawCategoryMessage> @event, CancellationToken cancellationToken)
-    {
-        switch (@event)
-        {
-            case UpdateEvent<RawCategoryMessage> update:
-                _categoryToSportId.TryGetValue(update.Key, out var previousSportId);
-                _categoryToSportId[update.Key] = update.NewValue.SportId;
-
-                _logger.LogInformation("Categories live update for key {Key}:{NewLine}{Payload}", update.Key, Environment.NewLine, ToJson(update.NewValue));
-
-                if (!string.IsNullOrWhiteSpace(previousSportId) && !string.Equals(previousSportId, update.NewValue.SportId, StringComparison.Ordinal))
-                {
-                    await PublishTaxonomyForSportAsync(previousSportId, "category sport change", cancellationToken);
-                }
-
-                await PublishTaxonomyForSportAsync(update.NewValue.SportId, "category update", cancellationToken);
-                break;
-
-            case DeleteEvent<RawCategoryMessage> delete:
-                _logger.LogInformation("Categories live delete for key {Key}.", delete.Key);
-
-                if (_categoryToSportId.TryRemove(delete.Key, out var sportId))
-                {
-                    await PublishTaxonomyForSportAsync(sportId, "category delete", cancellationToken);
-                }
-                else
-                {
-                    _logger.LogInformation("No sport mapping found for deleted category key {Key}.", delete.Key);
-                }
-
-                break;
-        }
-    }
-
-    private async Task PublishTaxonomyForSportAsync(string sportId, string reason, CancellationToken cancellationToken)
-    {
-        var sport = _sportsTableView.Get(sportId);
-
-        if (sport is null)
-        {
-            _logger.LogInformation("Taxonomy projection removed for sport {SportId} after {Reason}. Publishing Tombstone.", sportId, reason);
-            await _taxonomyPublisher.PublishDeleteMessageAsync(sportId, cancellationToken);
-            return;
-        }
-
-        var sportCategories = new List<RawCategoryMessage>();
-
-        await foreach (var category in _categoriesTableView.GetAllAsync(cancellationToken).WithCancellation(cancellationToken))
-        {
-            if (string.Equals(category.SportId, sportId, StringComparison.Ordinal))
+            if (countryCategories.TryGetValue(categoryId.Value, out var countryCategory))
             {
-                sportCategories.Add(category);
+                nodes.Add(new GeoTaxonomyNode(countryCategory.Id, countryCategory.CountryCode!));
+            }
+            else
+            {
+                var rawCategoryMessage = await _categoriesTableView.GetAsync(categoryId.Value, cancellationToken);
+                if(rawCategoryMessage?.CountryCode != null)
+                {
+                    nodes.Add(new GeoTaxonomyNode(rawCategoryMessage.Id, rawCategoryMessage.CountryCode!));
+                }
+            }
+
+        }
+        return [.. nodes.OrderBy(cat => cat.CountryCode)];
+    }
+    private async Task<List<GeoTaxonomyNode>> FilterCategoriesForGeoViewAsync(IReadOnlySet<CategoryId> categoriesIds, CancellationToken cancellationToken)
+    {
+        List<GeoTaxonomyNode> nodes = new(categoriesIds.Count);
+        foreach (var categoryId in categoriesIds)
+        {
+            var rawCategoryMessage = await _categoriesTableView.GetAsync(categoryId.Value, cancellationToken);
+            if(rawCategoryMessage?.CountryCode != null)
+            {
+                nodes.Add(new GeoTaxonomyNode(rawCategoryMessage.Id, rawCategoryMessage.CountryCode!));
             }
         }
 
-        var taxonomy = BuildTaxonomy(sport, sportCategories);
-
-        _logger.LogInformation("Publishing recalculated taxonomy for sport {SportId} after {Reason}.", sportId, reason);
-
-        await _taxonomyPublisher.PublishAsync(taxonomy, cancellationToken);
+        return [.. nodes.OrderBy(cat => cat.CountryCode)];
+    }
+    private async Task<GeoTaxonomyViewMessage> GetViewFromSport(SportMessage sport, CancellationToken cancellationToken)
+    {
+        var sportId = new SportId(sport.Id);
+        var pendingCategories = await _pendingIndex.GetOrphanCategoriesBySport(sportId, cancellationToken);
+        var sportCategories = await FilterCategoriesForGeoViewAsync(pendingCategories, cancellationToken);
+        return GeoTaxonomyViewMessage.Create(sport, sportCategories);
     }
 
-    private static string ToJson<T>(T value) => JsonSerializer.Serialize(value, new JsonSerializerOptions { WriteIndented = true });
+    private async Task OnCategoryChangeAsync(Event<RawCategoryMessage> @event, CancellationToken cancellationToken)
+    {
+        switch (@event)
+        {
+            case EventCreated<RawCategoryMessage> created:
+                await OnCategoryCreated(created.NewValue, cancellationToken);
+
+                break;
+            case EventUpdated<RawCategoryMessage> updated:
+                await OnCategoryUpdated(updated.NewValue, updated.CurrentValue, cancellationToken);
+                break;
+
+            case EventDeleted<RawCategoryMessage> deleted:
+                await OnCategoryDeleted(new SportId(deleted.CurrentValue.SportId), new CategoryId(deleted.CurrentValue.Id), cancellationToken);
+
+                break;
+        }
+    }
+
+    private async Task OnSportChangeAsync(Event<SportMessage> @event, CancellationToken cancellationToken)
+    {
+        switch (@event)
+        {
+            case EventCreated<SportMessage> created:
+                await OnSportCreated(created.NewValue, cancellationToken);
+                break;
+            case EventUpdated<SportMessage> updated:
+                _logger.LogInformation("Sports live update for key {Key}:{NewLine}{Payload}",
+                                       updated.Key,
+                                       Environment.NewLine,
+                                       ToJson(updated.NewValue));
+                await OnSportUpdated(updated.NewValue, updated.CurrentValue, cancellationToken);
+                break;
+
+            case EventDeleted<SportMessage> delete:
+                _logger.LogInformation("Sports live delete for key {Key}.", delete.Key);
+                await OnSportDeleted(delete.Key, cancellationToken);
+                break;
+        }
+    }
+
+    private async Task OnCategoryDeleted(SportId sportId, CategoryId categoryId, CancellationToken cancellationToken)
+    {
+        await _relationIndex.RemoveCategorybySportAsync(sportId, categoryId, cancellationToken);
+        await _pendingIndex.RemoveOrphanCategorybySportAsync(sportId, categoryId, cancellationToken);
+        var viewUpdated = await _materializeViewStorage.RemoveCategoryAsync(sportId, categoryId, cancellationToken);
+
+        if (viewUpdated is not null)
+        {
+            await _taxonomyPublisher.PublishAsync(viewUpdated!, cancellationToken);
+        }
+    }
+    private async Task OnCategoryUpdated(RawCategoryMessage category, RawCategoryMessage oldCategory, CancellationToken cancellationToken)
+    {
+        // TODO: Use fractional
+        if (category.SportId == oldCategory.SportId)
+        {
+            if (category.CountryCode == oldCategory.CountryCode)
+            {
+                return;
+            }
+            // cahange categoryType
+            if(category.CountryCode is null)
+            {
+                await OnCategoryDeleted(new SportId(category.SportId), new CategoryId(category.Id), cancellationToken);
+                return;
+            }
+            var view = _materializeViewStorage.AddCategoryAsync(category.SportId, new GeoTaxonomyNode(category.Id, category.CountryCode!), cancellationToken);
+
+            if (view is not null)
+            {
+                await _taxonomyPublisher.PublishAsync(view!, cancellationToken);
+            }
+        }
+        else
+        {
+            await OnCategoryDeleted(oldCategory, oldCategory.Id, cancellationToken);
+            await OnCategoryCreated(category, cancellationToken);
+        }
+    }
+
+    private async Task OnCategoryCreated(RawCategoryMessage rawCategoryMessage, CancellationToken cancellationToken)
+    {
+        if (rawCategoryMessage.CountryCode is null)
+        {
+            return;
+        }
+
+        await _relationIndex.AddAsync(rawCategoryMessage.SportId, rawCategoryMessage.Id, cancellationToken);
+        var sport = await _sportsTableView.GetAsync(rawCategoryMessage.SportId);
+
+        if (sport is null)
+        {
+            await _pendingIndex.AddAsync(rawCategoryMessage.SportId, rawCategoryMessage.Id, cancellationToken);
+            return;
+        }
+
+        var viewUpdated = _materializeViewStorage.GetAndUpdate(sport.Id,
+                                            (currentView) =>
+                                            {
+                                                currentView.AddOrUpdateCategory(new GeoTaxonomyNode(rawCategoryMessage.Id, rawCategoryMessage.CountryCode));
+                                                return currentView;
+                                            });
+
+        if (viewUpdated is not null)
+        {
+            await _taxonomyPublisher.PublishAsync(viewUpdated!, cancellationToken);
+        }
+    }
+
+
+    private async Task OnSportCreated(SportMessage sport, CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("Sport created for key {Key}:{NewLine}{Payload}",
+                               sport.Id,
+                               Environment.NewLine,
+                               ToJson(sport));
+        GeoTaxonomyViewMessage newView = await GetViewFromSport(sport, cancellationToken);
+        _materializeViewStorage.AddView(sport.Id, newView);
+        await _taxonomyPublisher.PublishAsync(newView, cancellationToken);
+        await _pendingIndex.ClearAsync(sport.Id, cancellationToken);
+    }
+    private async Task OnSportUpdated(SportMessage sport, SportMessage oldSport, CancellationToken cancellationToken)
+    {
+        // 1. Fractional
+        if ((sport.Name, sport.SportType) == (oldSport.Name, oldSport.SportType))
+        {
+            return;
+        }
+
+        var viewUpdated = _materializeViewStorage.TryUpdate(sport.Id
+            , (sportId) => GetViewFromSport(sport, cancellationToken).Result
+            , (sportId, currentView) => GeoTaxonomyViewMessage.Create(sport, currentView.GeoCategories));
+
+        await _taxonomyPublisher.PublishAsync(viewUpdated, cancellationToken);
+    }
+
+    private async Task OnSportDeleted(string sportId, CancellationToken cancellationToken)
+    {
+        await _relationIndex.ClearAsync(sportId, cancellationToken);
+        await _pendingIndex.ClearAsync(sportId, cancellationToken);
+
+        var viewRemoved = _materializeViewStorage.RemoveView(sportId);
+
+        //var categoryIds = viewRemoved?.GeoCategories?.Select(c => c.CategoryId);
+
+    }
 }

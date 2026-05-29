@@ -1,16 +1,27 @@
-<Project Sdk="Microsoft.NET.Sdk">
-
-  <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-  </PropertyGroup>
-
-  <ItemGroup>
-    <PackageReference Include="DotPulsar" Version="5.3.1" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.8" />
-    <PackageReference Include="System.Reactive" Version="6.1.0" />
-    <ProjectReference Include="..\PoC.Pulsar.TableView.Contracts\PoC.Pulsar.TableView.Contracts.csproj" />
-  </ItemGroup>
-
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<ImplicitUsings>
+			enable
+		</ImplicitUsings>
+		<Nullable>
+			enable
+		</Nullable>
+	</PropertyGroup>
+	<ItemGroup>
+		<PackageReference Include="DotPulsar" Version="5.3.1" />
+		<PackageReference Include="Chr.Avro.Binary" Version="10.13.1" />
+		<PackageReference Include="Chr.Avro.Json" Version="10.13.1" />
+		<PackageReference Include="MemoryPack" Version="1.21.4" />
+		<PackageReference Include="MemoryPack.Generator" Version="1.21.4">
+			<PrivateAssets>all</PrivateAssets>
+			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+		</PackageReference>
+		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.8" />
+		<PackageReference Include="Microsoft.IO.RecyclableMemoryStream" Version="3.0.1" />
+		<PackageReference Include="System.Reactive" Version="6.1.0" />
+		<PackageReference Include="Microsoft.Garnet" Version="1.1.6" />
+		<ProjectReference Include="..\PoC.Pulsar.TableView.Contracts\PoC.Pulsar.TableView.Contracts.csproj" />
+		<ProjectReference Include="..\PoC.Pulsar.TableView.Domain\PoC.Pulsar.TableView.Domain.csproj" />
+	</ItemGroup>
 </Project>

@@ -1,6 +1,3 @@
 namespace PoC.Pulsar.TableView.Contracts;
 
-public sealed class GeoTaxonomyNode
-{
-    public string CountryCode { get; init; } = null!;
-}
+public sealed record GeoTaxonomyNode(string CategoryId, string CountryCode);

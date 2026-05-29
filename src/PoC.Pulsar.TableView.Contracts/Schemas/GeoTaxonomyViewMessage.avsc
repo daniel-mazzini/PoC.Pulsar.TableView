@@ -6,6 +6,7 @@
     { "name": "SportId", "type": "string" },
     { "name": "SportName", "type": "string" },
     { "name": "SportType", "type": "string" },
+    { "name": "Version", "type": "int", "default": 0 },
     {
       "name": "GeoCategories",
       "type": {
@@ -14,7 +15,8 @@
           "type": "record",
           "name": "GeoTaxonomyNode",
           "fields": [
-            { "name": "CountryCode", "type": "string" }
+            { "name": "CategoryId", "type": "string", "default": "" },
+            { "name": "CountryCode", "type": "string", "default": "" }
           ]
         }
       },

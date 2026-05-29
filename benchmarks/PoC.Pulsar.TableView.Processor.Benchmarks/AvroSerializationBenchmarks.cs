@@ -8,8 +8,8 @@ namespace PoC.Pulsar.TableView.Processor.Benchmarks;
 [Orderer(SummaryOrderPolicy.FastestToSlowest)]
 public class GeoTaxonomyAvroSerializationBenchmarks
 {
-    private DefaultAvroSerializer<GeoTaxonomyMessage> _serializer = null!;
-    private GeoTaxonomyMessage _message = null!;
+    private DefaultAvroSerializer<GeoTaxonomyViewMessage> _serializer = null!;
+    private GeoTaxonomyViewMessage _message = null!;
 
     [Params(1, 10, 100, 1_000)]
     public int CategoryCount { get; set; }
@@ -17,7 +17,7 @@ public class GeoTaxonomyAvroSerializationBenchmarks
     [GlobalSetup] 
     public void global_setup()
     {
-        _serializer = new DefaultAvroSerializer<GeoTaxonomyMessage>("GeoTaxonomyMessage.avsc");
+        _serializer = new DefaultAvroSerializer<GeoTaxonomyViewMessage>("GeoTaxonomyViewMessage.avsc");
         _message = create_message(CategoryCount);
     }
 
@@ -47,26 +47,24 @@ public class GeoTaxonomyAvroSerializationBenchmarks
         return AvroBenchmarkSerialization.serialize_to_recyclable_memory_stream(_serializer, _message);
     }
 
-    private static GeoTaxonomyMessage create_message(int categoryCount)
+    private static GeoTaxonomyViewMessage create_message(int categoryCount)
     {
         var categories = new List<GeoTaxonomyNode>(categoryCount);
 
         for (var index = 0; index < categoryCount; index++)
         {
-            categories.Add(new GeoTaxonomyNode
-            {
-                CountryCode = $"C{index % 1_000:000}"
-            });
+            categories.Add(new GeoTaxonomyNode($"category-{index}", $"C{index % 1_000:000}"));
         }
 
-        return new GeoTaxonomyMessage
-        {
-            SportId = "sport-1",
-            SportName = "Football",
-            SportType = "team",
-            Version = 3,
-            GeoCategories = categories
-        };
+        return GeoTaxonomyViewMessage.Create(
+            new SportMessage
+            {
+                Id = "sport-1",
+                Name = "Football",
+                SportType = "team"
+            },
+            categories,
+            version: 3);
     }
 }
 

@@ -143,21 +143,18 @@ public sealed class AvroMessageDeserializerTests
     }
 
     [Fact]
-    public async Task byte_array_pipe_writer_array_pool_stream_and_recyclable_stream_serialization_should_match_for_geo_taxonomy_message()
+    public async Task byte_array_pipe_writer_array_pool_stream_and_recyclable_stream_serialization_should_match_for_geo_taxonomy_view_message()
     {
-        var serializer = new DefaultAvroSerializer<GeoTaxonomyMessage>("GeoTaxonomyMessage.avsc");
-        var message = new GeoTaxonomyMessage
-        {
-            SportId = "sport-1",
-            SportName = "Football",
-            SportType = "team",
-            Version = 3,
-            GeoCategories =
-            [
-                new GeoTaxonomyNode { CountryCode = "GB" },
-                new GeoTaxonomyNode { CountryCode = "ES" }
-            ]
-        };
+        var serializer = new DefaultAvroSerializer<GeoTaxonomyViewMessage>("GeoTaxonomyViewMessage.avsc");
+        var message = GeoTaxonomyViewMessage.Create(
+            new SportMessage
+            {
+                Id = "sport-1",
+                Name = "Football",
+                SportType = "team"
+            },
+            [new GeoTaxonomyNode("category-1", "GB"), new GeoTaxonomyNode("category-2", "ES")],
+            version: 3);
 
         var byteArrayBytes = serializer.Serialize(message);
         var pipeWriterBytes = await serialize_with_pipe_writer(serializer, message);
@@ -171,9 +168,9 @@ public sealed class AvroMessageDeserializerTests
         Assert.Equal(message.SportId, roundTrip.SportId);
         Assert.Equal(message.SportName, roundTrip.SportName);
         Assert.Equal(message.SportType, roundTrip.SportType);
+        Assert.Equal(message.Version, roundTrip.Version);
         Assert.Equal(2, roundTrip.GeoCategories.Count);
-        Assert.Equal("GB", roundTrip.GeoCategories[0].CountryCode);
-        Assert.Equal("ES", roundTrip.GeoCategories[1].CountryCode);
+        Assert.Equal(["ES", "GB"], roundTrip.GeoCategories.Select(category => category.CountryCode).OrderBy(code => code));
     }
 
     private static async Task<byte[]> serialize_with_pipe_writer<T>(DefaultAvroSerializer<T> serializer, T message)

@@ -1,24 +1,25 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-  </PropertyGroup>
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<TargetFramework>net10.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+	</PropertyGroup>
 
-  <ItemGroup>
-    <PackageReference Include="Chr.Avro.Binary" Version="10.13.1" />
-    <PackageReference Include="Chr.Avro.Json" Version="10.13.1" />
-    <PackageReference Include="DotPulsar" Version="5.3.1" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.8" />
-    <PackageReference Include="Microsoft.IO.RecyclableMemoryStream" Version="3.0.1" />
-  </ItemGroup>
+	<ItemGroup>
+		
+		<PackageReference Include="DotPulsar" Version="5.3.1" />
+		<PackageReference Include="System.Reactive" Version="6.1.0" />
+		<PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.8" />
+		<PackageReference Include="Microsoft.IO.RecyclableMemoryStream" Version="3.0.1" />
+	</ItemGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\PoC.Pulsar.TableView.Contracts\PoC.Pulsar.TableView.Contracts.csproj" />
-    <ProjectReference Include="..\PoC.Pulsar.TableView.Infrastructure.Store\PoC.Pulsar.TableView.Infrastructure.Store.csproj" />
-    <None Include="..\PoC.Pulsar.TableView.Contracts\Schemas\*.avsc" Link="Schemas\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\PoC.Pulsar.TableView.Contracts\PoC.Pulsar.TableView.Contracts.csproj" />
+		<ProjectReference Include="..\PoC.Pulsar.TableView.Domain\PoC.Pulsar.TableView.Domain.csproj" />
+		<ProjectReference Include="..\PoC.Pulsar.TableView.Infrastructure.Store\PoC.Pulsar.TableView.Infrastructure.Store.csproj" />
+		<None Include="..\PoC.Pulsar.TableView.Contracts\Schemas\*.avsc" Link="Schemas\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+	</ItemGroup>
 
 </Project>

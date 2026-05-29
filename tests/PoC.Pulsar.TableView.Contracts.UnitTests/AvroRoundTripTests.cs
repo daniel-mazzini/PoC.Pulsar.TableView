@@ -86,28 +86,26 @@ public sealed class AvroRoundTripTests
     }
 
     [Fact]
-    public void geo_taxonomy_message_round_trips_nested_nodes()
+    public void geo_taxonomy_view_message_round_trips_nested_nodes()
     {
-        var message = new GeoTaxonomyMessage
-        {
-            SportId = "sport-1",
-            SportName = "Football",
-            SportType = "team",
-            GeoCategories = [
-                new GeoTaxonomyNode
-                {
-                    CountryCode = "GB"
-                }
-            ]
-        };
+        var message = GeoTaxonomyViewMessage.Create(
+            new SportMessage
+            {
+                Id = "sport-1",
+                Name = "Football",
+                SportType = "team"
+            },
+            [new GeoTaxonomyNode("category-1", "GB")],
+            version: 3);
 
-        var roundTrip = RoundTrip(message, "GeoTaxonomyMessage.avsc");
+        var roundTrip = RoundTrip(message, "GeoTaxonomyViewMessage.avsc");
 
         Assert.Equal(message.SportId, roundTrip.SportId);
         Assert.Equal(message.SportName, roundTrip.SportName);
         Assert.Equal(message.SportType, roundTrip.SportType);
+        Assert.Equal(message.Version, roundTrip.Version);
         Assert.Single(roundTrip.GeoCategories);
-        Assert.Equal("GB", roundTrip.GeoCategories[0].CountryCode);
+        Assert.Equal("GB", roundTrip.GeoCategories.First().CountryCode);
     }
 
     [Fact]
@@ -128,7 +126,7 @@ public sealed class AvroRoundTripTests
     }
 
     private static T RoundTrip<T>(T value, string schemaFileName)
-        where T : class, new()
+        where T : class
     {
         var schemaJson = ReadSchemaJson(schemaFileName);
         var schema = new JsonSchemaReader((IJsonDeserializerBuilder?)null).Read(schemaJson, new JsonSchemaReaderContext());
