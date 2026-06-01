@@ -8,7 +8,6 @@ using PoC.Pulsar.TableView.Domain.Storages.Indexes;
 using PoC.Pulsar.TableView.Domain.Storages.MaterializeViews;
 using PoC.Pulsar.TableView.Infrastructure.Store.Publisher;
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.Reactive.Linq;
 using System.Text.Json;
 

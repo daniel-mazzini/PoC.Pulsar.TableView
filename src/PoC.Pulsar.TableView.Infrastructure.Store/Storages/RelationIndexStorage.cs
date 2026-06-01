@@ -44,18 +44,13 @@ public class RelationIndexStorage : TsavoriteRepositoryBase, IDisposable
     private async ValueTask UpsertRelationAsync<T>(StorageKey key, T[] values, CancellationToken cancellationToken)
     {
         ThrowIfDisposed();
-        await _engine.CommitAsync(
-            async ct =>
-            {
-                await UpsertIntoSessionAsync<T[], Tsavorite.core.SpanByte, Tsavorite.core.SpanByteAndMemory, Tsavorite.core.SpanByteFunctions<Tsavorite.core.Empty>>(
-                    _session,
-                    key.Value,
-                    default,
-                    values,
-                    ct);
-            },
-            cancellationToken);
+        await UpsertIntoSessionAsync(_session,
+                                     key.Value,
+                                     default,
+                                     values,
+                                     cancellationToken);
     }
+
     private void ThrowIfDisposed()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);

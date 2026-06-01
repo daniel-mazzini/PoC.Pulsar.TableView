@@ -1,29 +1,28 @@
 ﻿using PoC.Pulsar.TableView.Domain.Storages.StateStore;
-using System.Collections.Concurrent;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.Storages.Session;
 
 using StateAllocator = SpanByteAllocator<StoreFunctions<SpanByte, SpanByte, SpanByteComparer, SpanByteRecordDisposer>>;
-using StateSession = Tsavorite.core.ClientSession<
-    Tsavorite.core.SpanByte,
-    Tsavorite.core.SpanByte,
-    Tsavorite.core.SpanByte,
-    Tsavorite.core.SpanByteAndMemory,
-    Tsavorite.core.Empty,
-    Tsavorite.core.SpanByteFunctions<Tsavorite.core.Empty>,
-    Tsavorite.core.StoreFunctions<Tsavorite.core.SpanByte, Tsavorite.core.SpanByte, Tsavorite.core.SpanByteComparer, Tsavorite.core.SpanByteRecordDisposer>,
-    Tsavorite.core.SpanByteAllocator<Tsavorite.core.StoreFunctions<Tsavorite.core.SpanByte, Tsavorite.core.SpanByte, Tsavorite.core.SpanByteComparer, Tsavorite.core.SpanByteRecordDisposer>>>;
+using StateSession = ClientSession<
+    SpanByte,
+    SpanByte,
+    SpanByte,
+    SpanByteAndMemory,
+    Empty,
+    SpanByteFunctions<Empty>,
+    StoreFunctions<SpanByte, SpanByte, SpanByteComparer, SpanByteRecordDisposer>,
+    SpanByteAllocator<StoreFunctions<SpanByte, SpanByte, SpanByteComparer, SpanByteRecordDisposer>>>;
 
-internal class TsavoriteSessionWrapper : IStateSession, ITsavoriteSessionProvider
+public class TsavoriteSessionWrapper : ITsavoriteSessionProvider
 {
-    private readonly TsavoriteEngine _engine;
+    private readonly ITsavoriteEngine _engine;
     private StateSession? _lightSession;
     private readonly ConcurrentDictionary<Type, IDisposable> _rmwSessions = new();
     private bool _disposed;
 
     public Guid SessionId { get; }
 
-    public TsavoriteSessionWrapper(TsavoriteEngine engine)
+    public TsavoriteSessionWrapper(ITsavoriteEngine engine)
     {
         _engine = engine;
         SessionId = Guid.NewGuid();
@@ -31,7 +30,7 @@ internal class TsavoriteSessionWrapper : IStateSession, ITsavoriteSessionProvide
     public StateSession GetLightSession()
     {
         ThrowIfDisposed();
-        return _lightSession ??= _engine.CreateLightSession();
+        return _lightSession ??= _engine.CreateBasicSession();
     }
     public ClientSession<SpanByte, SpanByte, TInput, TOutput, Empty, TFunctions, StoreFunctions<SpanByte, SpanByte, SpanByteComparer, SpanByteRecordDisposer>, StateAllocator> GetSession<TInput, TOutput, TFunctions>(TFunctions customFunctions = null)
         where TFunctions : SessionFunctionsBase<SpanByte, SpanByte, TInput, TOutput, Empty>
@@ -49,14 +48,12 @@ internal class TsavoriteSessionWrapper : IStateSession, ITsavoriteSessionProvide
         foreach (var session in _rmwSessions.Values) session.Dispose();
         _rmwSessions.Clear();
         _disposed = true;
+
+        GC.SuppressFinalize(this);
         
     }
     private void ThrowIfDisposed()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
     }
-   
-    
-
-    
 }

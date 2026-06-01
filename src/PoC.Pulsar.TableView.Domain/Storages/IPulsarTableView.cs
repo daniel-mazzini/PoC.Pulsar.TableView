@@ -16,3 +16,7 @@ public interface IPulsarTableView<TMessage>
 
     Task StartLiveTailAsync(CancellationToken cancellationToken);
 }
+
+
+
+

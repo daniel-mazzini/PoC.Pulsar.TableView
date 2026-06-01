@@ -1,43 +1,17 @@
-﻿using PoC.Pulsar.TableView.Contracts;
-using PoC.Pulsar.TableView.Domain.Storages;
-using PoC.Pulsar.TableView.Domain.Storages.Controls;
-using PoC.Pulsar.TableView.Domain.Storages.Entities;
-using PoC.Pulsar.TableView.Domain.Storages.StateStore;
+﻿using PoC.Pulsar.TableView.Domain.Storages.StateStore;
+using PoC.Pulsar.TableView.Infrastructure.Store.Storages.Session;
 
-namespace PoC.Pulsar.TableView.Infrastructure.Store.Storages.Session;
-
-public sealed class SportTableViewUnitOfWork : TsavoriteUnitOfWorkBase, ITableViewUnitOfWork<SportMessage>
-{
-    public IMessageStorage<string, SportMessage> MessageStorage { get; }
-
-    public ICheckpointStorage CheckpointStorage => throw new NotImplementedException();
-
-    public SportTableViewUnitOfWork(TsavoriteEngine engine, IStateSerializer serializer)
-        : base(engine)
-    {
-
-        MessageStorage = new SportMessageStorage(SessionWrapper, serializer);
-    }
-    public Task CommitAsync(CancellationToken ct)
-    {
-        throw new NotImplementedException();
-    }
-
-    public void Dispose()
-    {
-        throw new NotImplementedException();
-    }
-}
+namespace PoC.Pulsar.TableView.Infrastructure.Store.Storages.UnitOfWorks;
 
 public abstract class TsavoriteUnitOfWorkBase : IUnitOfWork
 {
-    protected readonly TsavoriteEngine Engine;
+    protected readonly ITsavoriteEngine Engine;
     private readonly IDisposable _checkpointScope;
-    private readonly TsavoriteSessionWrapper SessionWrapper;
+    protected readonly TsavoriteSessionWrapper SessionWrapper;
     private bool _isDisposed;
-    private bool _isCommitted; 
+    private bool _isCommitted;
 
-    protected TsavoriteUnitOfWorkBase(TsavoriteEngine engine)
+    protected TsavoriteUnitOfWorkBase(ITsavoriteEngine engine)
     {
         Engine = engine;
         _checkpointScope = Engine.DeferDurableCheckpoints();
@@ -50,7 +24,6 @@ public abstract class TsavoriteUnitOfWorkBase : IUnitOfWork
         {
             throw new ObjectDisposedException(nameof(TsavoriteUnitOfWorkBase));
         }
-
         if (_isCommitted)
         {
             return;

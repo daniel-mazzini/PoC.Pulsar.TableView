@@ -1,8 +1,6 @@
-using PoC.Pulsar.TableView.Domain.Entities;
 using System.Buffers;
-using System.Collections.Generic;
 
-namespace PoC.Pulsar.TableView.Infrastructure.Store.Readers;
+namespace PoC.Pulsar.TableView.Domain.Entities;
 
 public readonly record struct TableViewMessage(string TopicName,
                                                  int PartitionId,

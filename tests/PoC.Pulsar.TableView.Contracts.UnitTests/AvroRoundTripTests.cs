@@ -1,6 +1,5 @@
 using Chr.Avro.Representation;
 using Chr.Avro.Serialization;
-using PoC.Pulsar.TableView.Contracts;
 using Xunit;
 using BinaryReader = Chr.Avro.Serialization.BinaryReader;
 using BinaryWriter = Chr.Avro.Serialization.BinaryWriter;

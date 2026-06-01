@@ -4,6 +4,6 @@ namespace PoC.Pulsar.TableView.Domain.Storages.Controls;
 
 public interface IRejectedStorage
 {
-    Task SaveRejectedRecordAsync(RejectedProjection rejectedProjection, CancellationToken cancellationToken);
+    ValueTask SaveRejectedRecordAsync(RejectedProjection rejectedProjection, CancellationToken cancellationToken);
 }
 

@@ -1,5 +1,3 @@
-using PoC.Pulsar.TableView.Infrastructure.Store;
-using PoC.Pulsar.TableView.Infrastructure.Store.Abstractions;
 using Xunit;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.IntegrationTests;

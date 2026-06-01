@@ -1,4 +1,3 @@
-using PoC.Pulsar.TableView.Infrastructure.Store;
 using Xunit;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.UnitTests;

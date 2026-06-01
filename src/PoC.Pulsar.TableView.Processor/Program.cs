@@ -1,12 +1,16 @@
 using DotPulsar;
 using Microsoft.Extensions.Logging;
 using PoC.Pulsar.TableView.Contracts;
+using PoC.Pulsar.TableView.Domain.Entities;
 using PoC.Pulsar.TableView.Domain.Storages;
+using PoC.Pulsar.TableView.Domain.Storages.Controls;
 using PoC.Pulsar.TableView.Domain.Storages.Entities;
 using PoC.Pulsar.TableView.Domain.Storages.Indexes;
+using PoC.Pulsar.TableView.Domain.Storages.StateStore;
 using PoC.Pulsar.TableView.Infrastructure.Store;
 using PoC.Pulsar.TableView.Infrastructure.Store.Publisher;
 using PoC.Pulsar.TableView.Infrastructure.Store.Readers;
+using PoC.Pulsar.TableView.Infrastructure.Store.Serialization;
 using PoC.Pulsar.TableView.Infrastructure.Store.Storages;
 using PoC.Pulsar.TableView.Processor;
 using PoC.Pulsar.TableView.Processor.Configuration;
@@ -38,24 +42,36 @@ await using var client = PulsarClient.Builder()
     .ServiceUrl(new Uri(options.ServiceUrl, UriKind.Absolute))
     .Build();
 
+// State serializar (used when save in store)
 IStateSerializer serializer = new MemoryPackWrapper();
 ITsavoriteEngine tsavoriteEngine = new TsavoriteEngine(options.StorePath);
 loggerFactory.CreateLogger<Program>()
             .LogInformation("store initialized at path {StorePath}", options.StorePath);
 
+// Message serialization
+AvroSchemaRegistry avroSchemaRegistry = new AvroSchemaRegistry();
+avroSchemaRegistry.Register<SportMessage>("./Schemas/SportMessage");
+var avroSerializer = avroSchemaRegistry.Build();
+
+// Metadata storage
+IMetadataStorage metadataStorage = new MetadataStorage(tsavoriteEngine, serializer);
+StoreMetadata metadata = await metadataStorage.EnsureMetadataAsync(CancellationToken.None);
+
+// Unit of Work
+IUnitOfWorkFactory unitOfWorkFactory = new UnitOfWorkFactory(tsavoriteEngine, metadataStorage, serializer);
+
 IProjectorTopicReaderFactory readerFactory = new DotPulsarProjectorTopicReaderFactory(client, options.InputNamespace);
-IAvroSerializer<GeoTaxonomyViewMessage> _projectionSerializer = new DefaultAvroSerializer<GeoTaxonomyViewMessage>("GeoTaxonomyViewMessage.avsc");
-await using var publisher = new DotPulsarPropertyTaxonomyViewPublisher(client,options.OutputNamespace,_projectionSerializer);
 
-
-ISportMessageStorage sportStore = new SportMessageStorage(tsavoriteEngine, serializer);
-var sportDeserializer = new DefaultAvroSerializer<SportMessage>("SportMessage.avsc");
+await using var projectorPublisher = new DotPulsarPropertyTaxonomyViewPublisher(client,options.OutputNamespace,avroSerializer);
+await using var rejectedPublisher = new DotPulsarRejectedMessagePublisher(client, options.OutputNamespace, avroSerializer);
 
 var sportsView = new PulsarTableView<SportMessage>(
-    client,
     BuildTopic(inputNamespace, PulsarTopics.Sports),
-    sportDeserializer.Deserialize,
-    sportStore,
+    readerFactory,
+    rejectedPublisher,
+    unitOfWorkFactory,
+    avroSerializer,
+    metadata,
     loggerFactory.CreateLogger<PulsarTableView<SportMessage>>());
 
 ICategoryMessageStorage categoryStore = new CategoryMessageStorage(tsavoriteEngine, serializer);

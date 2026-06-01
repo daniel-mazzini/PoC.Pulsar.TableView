@@ -5,7 +5,6 @@ using Microsoft.IO;
 using PoC.Pulsar.TableView.Contracts;
 using PoC.Pulsar.TableView.Domain.Entities;
 using PoC.Pulsar.TableView.Infrastructure.Store.Observability;
-using PoC.Pulsar.TableView.Infrastructure.Store.Publisher;
 using PoC.Pulsar.TableView.Infrastructure.Store.Readers;
 using PoC.Pulsar.TableView.Infrastructure.Store.Serialization;
 using System.Buffers;
@@ -13,10 +12,10 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 
-namespace PoC.PulsarReader.PropertyTaxonomyProjector.Projection;
+namespace PoC.Pulsar.TableView.Infrastructure.Store.Publisher;
 
 [ExcludeFromCodeCoverage(Justification = "Integration adapter around real DotPulsar producers.")]
-internal sealed class DotPulsarRejectedMessagePublisher : IRejectedMessagePublisher, IAsyncDisposable
+public sealed class DotPulsarRejectedMessagePublisher : IRejectedMessagePublisher, IAsyncDisposable
 {
     private readonly IProducer<ReadOnlySequence<byte>> _sportRejectedProducer;
     private readonly IProducer<ReadOnlySequence<byte>> _categoryRejectedProducer;

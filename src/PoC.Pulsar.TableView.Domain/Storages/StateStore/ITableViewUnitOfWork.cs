@@ -7,6 +7,8 @@ public interface ITableViewUnitOfWork<TMessage> : IUnitOfWork
 {
     IMessageStorage<string,TMessage> MessageStorage { get; }
     ICheckpointStorage CheckpointStorage { get; }
+
+    IRejectedStorage RejectedStorage { get; }
 }
 
 

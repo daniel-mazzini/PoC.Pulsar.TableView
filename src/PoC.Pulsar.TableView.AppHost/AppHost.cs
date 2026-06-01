@@ -1,5 +1,3 @@
-using Aspire.Hosting;
-
 var builder = DistributedApplication.CreateBuilder(args);
 
 var appHostDirectory = new DirectoryInfo(AppContext.BaseDirectory);

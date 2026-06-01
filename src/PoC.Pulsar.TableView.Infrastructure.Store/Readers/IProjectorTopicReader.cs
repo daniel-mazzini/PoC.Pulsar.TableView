@@ -1,3 +1,4 @@
+using PoC.Pulsar.TableView.Domain.Entities;
 using System.Collections.Generic;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.Readers;

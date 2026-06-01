@@ -2,7 +2,6 @@ using System.Buffers;
 using System.IO.Pipelines;
 using Microsoft.IO;
 using PoC.Pulsar.TableView.Contracts;
-using PoC.Pulsar.TableView.Processor;
 using Xunit;
 
 namespace PoC.Pulsar.TableView.Processor.UnitTests;

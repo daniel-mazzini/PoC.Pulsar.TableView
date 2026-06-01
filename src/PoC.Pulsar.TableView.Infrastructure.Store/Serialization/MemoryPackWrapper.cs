@@ -1,7 +1,7 @@
 ﻿using MemoryPack;
 using PoC.Pulsar.TableView.Domain.Storages;
 
-namespace PoC.Pulsar.TableView.Infrastructure.Store.Storages;
+namespace PoC.Pulsar.TableView.Infrastructure.Store.Serialization;
 
 public class MemoryPackWrapper : IStateSerializer
 {

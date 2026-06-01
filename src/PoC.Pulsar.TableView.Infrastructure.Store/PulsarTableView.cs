@@ -1,20 +1,15 @@
 using DotPulsar;
 using DotPulsar.Abstractions;
 using DotPulsar.Extensions;
-using DotPulsar.Internal;
 using Microsoft.Extensions.Logging;
 using PoC.Pulsar.TableView.Domain.Entities;
 using PoC.Pulsar.TableView.Domain.Filter;
 using PoC.Pulsar.TableView.Domain.Storages;
-using PoC.Pulsar.TableView.Domain.Storages.Controls;
-using PoC.Pulsar.TableView.Domain.Storages.Entities;
 using PoC.Pulsar.TableView.Domain.Storages.StateStore;
 using PoC.Pulsar.TableView.Infrastructure.Store.Observability;
 using PoC.Pulsar.TableView.Infrastructure.Store.Publisher;
 using PoC.Pulsar.TableView.Infrastructure.Store.Readers;
 using PoC.Pulsar.TableView.Infrastructure.Store.Serialization;
-using PoC.Pulsar.TableView.Infrastructure.Store.Storages;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
@@ -24,13 +19,14 @@ using System.Reactive.Subjects;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store;
 
-
 public sealed class PulsarTableView<TMessage> : IPulsarTableView<TMessage>
     where TMessage : class
 {
     private static readonly TimeSpan HighWatermarkLookupTimeout = TimeSpan.FromSeconds(30);
 
     private readonly IAvroSerializer _avroSerializer;
+    private readonly IProjectorMessageApplier<TMessage> _messageApplier;
+    private readonly StoreMetadata _storeMetadata;
     private readonly ConcurrentDictionary<string, TMessage> _localStorage = [];
     private readonly ILogger<PulsarTableView<TMessage>> _logger;
     private readonly IUnitOfWorkFactory _unitOfWorkFactory;
@@ -38,18 +34,18 @@ public sealed class PulsarTableView<TMessage> : IPulsarTableView<TMessage>
     private readonly IRejectedMessagePublisher _rejectedMessagePublisher;
     private readonly Subject<Event<TMessage>> _subject = new();
     private readonly string _topic;
-    private ConcurrentDictionary<int, MessageId?> _liveTailStartMessageId;
-    [ExcludeFromCodeCoverage]
+    private ConcurrentDictionary<int, MessageId?> _liveTailStartMessageId = [];
+
     public PulsarTableView(string topic,
                            IProjectorTopicReaderFactory projectorTopicReaderFactory,
                            IRejectedMessagePublisher rejectedMessagePublisher,
                            IUnitOfWorkFactory unitOfWorkFactory,
                            IAvroSerializer avroSerializer,
+                           IProjectorMessageApplier<TMessage> messageApplier,
+                           StoreMetadata storeMetadata,
                            ILogger<PulsarTableView<TMessage>> logger)
-    {
-        (_topic, _projectorTopicReaderFactory, _rejectedMessagePublisher, _unitOfWorkFactory, _avroSerializer, _logger) =
-            (topic, projectorTopicReaderFactory, rejectedMessagePublisher, unitOfWorkFactory, avroSerializer, logger);
-    }
+        => (_topic, _projectorTopicReaderFactory, _rejectedMessagePublisher, _unitOfWorkFactory, _avroSerializer, _messageApplier, _storeMetadata, _logger) =
+            (topic, projectorTopicReaderFactory, rejectedMessagePublisher, unitOfWorkFactory, avroSerializer, messageApplier, storeMetadata, logger);
 
     public IObservable<Event<TMessage>> OnUpdate => _subject.AsObservable();
     public async ValueTask<TMessage?> GetAsync(string key, CancellationToken cancellationToken)
@@ -79,52 +75,52 @@ public sealed class PulsarTableView<TMessage> : IPulsarTableView<TMessage>
 
     private async Task StartBoostrapByPartition(string topicName,
                                                 int partitionId,
-                                                ITsavoriteEngine engine,
-                                                MetadataStorage metadataStorage,
-                                                TopicHighWatermark highWatermark,
+                                                MessageId highMarketPartitionedMessageId,
                                                 CancellationToken cancellationToken)
     {
         ProjectorStoreTelemetry.IncrementActiveTopicReaders();
-        using var readerActivity = ProjectorStoreTelemetry.StartActivity(
-            "topic reader started",
-            topicName,
-            partitionId,
-            phase: "boostrap");
-        MessageId highMarketMessageId = highWatermark.GetPartitionHighWatermarkOrThrow(partitionId);
-        MessageId startMessageId = await GetStoreCheckPoint(topicName, partitionId, cancellationToken);
+        using var readerActivity = ProjectorStoreTelemetry.StartActivity("topic reader started",
+                                                                         topicName,
+                                                                         partitionId,
+                                                                         phase: "boostrap");
+
+        MessageId startMessageId = await GetStoreCheckPoint(topicName, partitionId, _storeMetadata, cancellationToken);
 
         try
         {
-            bool needsBootstrap = highMarketMessageId.CompareTo(startMessageId) > 0;
+            bool needsBootstrap = highMarketPartitionedMessageId.CompareTo(startMessageId) > 0;
 
             if (!needsBootstrap)
             {
                 return;
             }
+
             int limitCheck = 100_000;
             int counter = 0;
-            using var unitOfWork = _unitOfWorkFactory.CreateBootstrap<TMessage>();
             await using var reader = await _projectorTopicReaderFactory.CreateReaderAsync(topicName, partitionId, startMessageId, cancellationToken);
-            
-            while (!cancellationToken.IsCancellationRequested)
+            using (var unitOfWork = _unitOfWorkFactory.CreateBootstrap<TMessage>())
             {
-                TableViewMessage message = await reader.ReceiveAsync(cancellationToken);
-                //await ProcessMessageAsync(message, unitOfWork, false, cancellationToken);
-                counter++;
+                while (!cancellationToken.IsCancellationRequested)
+                {
+                    TableViewMessage message = await reader.ReceiveAsync(cancellationToken);
+                    await ProcessMessageAsync(message, unitOfWork, false, cancellationToken);
 
-                var currentId = ToDotPulsarMessageId(message.MessageId, topicName);
-                if (currentId.CompareTo(highMarketMessageId) >= 0)
-                {
-                    _logger.LogInformation("Bootstrap finalizado para {Topic} en el mensaje {Id}", topicName, message.MessageId);
-                    //store.Checkpoint();
-                    break;
-                }
-                if (counter % limitCheck == 0)
-                {
-                    await engine.CheckpointAsync(cancellationToken);
+                    counter++;
+
+                    var currentId = ToDotPulsarMessageId(message.MessageId, topicName);
+                    if (currentId.CompareTo(highMarketPartitionedMessageId) >= 0)
+                    {
+                        _logger.LogInformation("Bootstrap finalizado para {Topic} en el mensaje {Id}", topicName, message.MessageId);
+                        await unitOfWork.CheckpointStorage.SaveCheckpointAsync(topicName, partitionId, message.MessageId, cancellationToken);
+                        break;
+                    }
+                    if (counter % limitCheck == 0)
+                    {
+                        await _unitOfWorkFactory.MoveDurableAsync(cancellationToken);
+                    }
                 }
             }
-            _liveTailStartMessageId.AddOrUpdate(partitionId, (_) => highMarketMessageId, (_, _) => highMarketMessageId);
+            _liveTailStartMessageId.AddOrUpdate(partitionId, (_) => highMarketPartitionedMessageId, (_, _) => highMarketPartitionedMessageId);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -159,24 +155,153 @@ public sealed class PulsarTableView<TMessage> : IPulsarTableView<TMessage>
         {
             ProjectorStoreTelemetry.DecrementActiveTopicReaders();
         }
-        
+
     }
 
-    private async Task<MessageId> GetStoreCheckPoint(string topicName, int partitionId, CancellationToken cancellationToken)
+    private async Task ProcessMessageAsync(TableViewMessage tableViewMessage, ITableViewUnitOfWork<TMessage> unitOfWork, bool emitEvents, CancellationToken cancellationToken)
+    {
+        ProcessPhase phase = emitEvents ? ProcessPhase.Live : ProcessPhase.Bootstrap;
+        var tags = new TagList
+        {
+            ProjectorStoreTelemetry.StoreTag,
+            new("topic", tableViewMessage.TopicName),
+            new("partition_id", tableViewMessage.PartitionId),
+            new("phase", phase)
+        };
+
+        var stopwatch = Stopwatch.StartNew();
+        using var activity = ProjectorStoreTelemetry.StartActivity("reading and handling a Pulsar input message",
+                                                                   tableViewMessage.TopicName,
+                                                                   tableViewMessage.PartitionId,
+                                                                   phase: phase.Name);
+        
+
+        await _messageApplier.ApplyAsync(tableViewMessage,
+                                         phase,
+                                         unitOfWork,
+                                         (dataArray) => _avroSerializer.Deserialize<TMessage>(dataArray),
+                                         cancellationToken);
+
+        await unitOfWork.CheckpointStorage.SaveCheckpointAsync(tableViewMessage.TopicName,
+                                                               tableViewMessage.PartitionId,
+                                                               tableViewMessage.MessageId,
+                                                               cancellationToken);
+
+        ProjectorStoreTelemetry.TopicReaderMessagesProcessed.Add(1, tags);
+
+        if (phase == ProcessPhase.Bootstrap)
+        {
+            ProjectorStoreTelemetry.TopicReaderBootstrapMessagesProcessed.Add(1, tags);
+            _logger.LogInformation("message processed during bootstrap phase for topic {Topic} partition {PartitionId} PulsarMessageId {PulsarMessageId}",
+                                   tableViewMessage.TopicName,
+                                   tableViewMessage.PartitionId,
+                                   tableViewMessage.MessageId.ToString());
+        }
+        else
+        {
+            ProjectorStoreTelemetry.TopicReaderLiveMessagesProcessed.Add(1, tags);
+            _logger.LogInformation("message processed during live phase for topic {Topic} partition {PartitionId} PulsarMessageId {PulsarMessageId}",
+                                   tableViewMessage.TopicName,
+                                   tableViewMessage.PartitionId,
+                                   tableViewMessage.MessageId.ToString());
+        }
+        ProjectorStoreTelemetry.TopicMessageProcessingDuration.Record(stopwatch.Elapsed.TotalMilliseconds, tags);
+        activity?.SetTag("result", "success");
+    }
+
+    private async Task<MessageId> GetStoreCheckPoint(string topicName, int partitionId, StoreMetadata storeMetadata, CancellationToken cancellationToken)
     {
         MessageId startMessageId = MessageId.Earliest;
         using (var uow = _unitOfWorkFactory.CreateBootstrap<TMessage>())
         {
-            var lastCheckpoint = await uow.CheckpointStorage.GetLastCheckpoint(topicName, partitionId, cancellationToken);
-            if (lastCheckpoint is not null)
+            TopicCheckpoint? lastCheckpoint = await uow.CheckpointStorage.GetLastCheckpoint(topicName, partitionId, cancellationToken);
+            if (lastCheckpoint == null)
             {
-                startMessageId = ToDotPulsarMessageId(lastCheckpoint.LastProcessedMessageId, lastCheckpoint.TopicName);
+                return startMessageId;
             }
+
+            if (!storeMetadata.IsBoostrapCompleted)
+            {
+                ProjectorStoreTelemetry.CheckpointsIgnored.Add(1,
+                                                               ProjectorStoreTelemetry.StoreTag,
+                                                               new KeyValuePair<string, object?>("topic", topicName),
+                                                               new KeyValuePair<string, object?>("partition_id", partitionId),
+                                                               new KeyValuePair<string, object?>("result", "bootstrap_incomplete"));
+                _logger.LogInformation("checkpoint ignored for topic {Topic} partition {PartitionId}", topicName, partitionId);
+                return startMessageId;
+            }
+            else if (lastCheckpoint.StoreId != storeMetadata.StoreGenerationId)
+            {
+                ProjectorStoreTelemetry.CheckpointsIgnored.Add(1,
+                                                               ProjectorStoreTelemetry.StoreTag,
+                                                               new KeyValuePair<string, object?>("topic", topicName),
+                                                               new KeyValuePair<string, object?>("partition_id", partitionId),
+                                                               new KeyValuePair<string, object?>("result", "store_generation_mismatch"));
+                _logger.LogWarning(
+                    "checkpoint StoreGenerationId mismatch for topic {Topic} partition {PartitionId}",
+                    topicName,
+                    partitionId);
+            }
+
+            startMessageId = ToDotPulsarMessageId(lastCheckpoint.LastProcessedMessageId, lastCheckpoint.TopicName);
         }
 
         return startMessageId;
     }
+    //private async Task<TopicCheckpoint?> TryLoadTrustedCheckpointAsync(
+    //    string topicName,
+    //    int partitionId,
+    //    MessageId? highWatermark,
+    //    StoreMetadata metadata,
+    //    CancellationToken cancellationToken)
+    //{
+    //    if (highWatermark is null)
+    //    {
+    //        return null;
+    //    }
 
+    //    var checkpoint = await _store.TryLoadCheckpointAsync(topicName, partitionId, cancellationToken);
+    //    var canTrustCheckpoint = metadata.BootstrapCompleted
+    //        && checkpoint is not null
+    //        && checkpoint.StoreGenerationId == metadata.StoreGenerationId
+    //        && await _store.HasDurableProjectionStateAsync(topicName, partitionId, cancellationToken);
+
+    //    if (checkpoint is not null && !metadata.BootstrapCompleted)
+    //    {
+    //        ProjectorStoreTelemetry.CheckpointsIgnored.Add(
+    //            1,
+    //            ProjectorStoreTelemetry.StoreTag,
+    //            new KeyValuePair<string, object?>("topic", topicName),
+    //            new KeyValuePair<string, object?>("partition_id", partitionId),
+    //            new KeyValuePair<string, object?>("result", "bootstrap_incomplete"));
+    //        _logger.LogInformation("checkpoint ignored for topic {Topic} partition {PartitionId}", topicName, partitionId);
+    //    }
+    //    else if (checkpoint is not null && checkpoint.StoreGenerationId != metadata.StoreGenerationId)
+    //    {
+    //        ProjectorStoreTelemetry.CheckpointsIgnored.Add(
+    //            1,
+    //            ProjectorStoreTelemetry.StoreTag,
+    //            new KeyValuePair<string, object?>("topic", topicName),
+    //            new KeyValuePair<string, object?>("partition_id", partitionId),
+    //            new KeyValuePair<string, object?>("result", "store_generation_mismatch"));
+    //        _logger.LogWarning(
+    //            "checkpoint StoreGenerationId mismatch for topic {Topic} partition {PartitionId}",
+    //            topicName,
+    //            partitionId);
+    //    }
+    //    else if (checkpoint is not null && !canTrustCheckpoint)
+    //    {
+    //        ProjectorStoreTelemetry.CheckpointsIgnored.Add(
+    //            1,
+    //            ProjectorStoreTelemetry.StoreTag,
+    //            new KeyValuePair<string, object?>("topic", topicName),
+    //            new KeyValuePair<string, object?>("partition_id", partitionId),
+    //            new KeyValuePair<string, object?>("result", "missing_local_projection"));
+    //        _logger.LogInformation("checkpoint ignored for topic {Topic} partition {PartitionId}", topicName, partitionId);
+    //    }
+
+    //    return canTrustCheckpoint ? checkpoint : null;
+    //}
     public async Task StartBootstrapAsync(CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("Resolving high-watermarks for topic {Topic}.", _topic);
@@ -186,30 +311,22 @@ public sealed class PulsarTableView<TMessage> : IPulsarTableView<TMessage>
 
         if (!topicHighWatermark.HasMessages)
         {
-            _liveTailStartMessageId = null;
+            _liveTailStartMessageId = [];
             _logger.LogInformation("No messages found in topic {Topic}. Bootstrap completed instantly.", _topic);
             return;
         }
 
         List<Task> readerTasks = new(topicHighWatermark.PartitionIds.Count);
-        // TODO 
-        MetadataStorage metadataStorage;
         foreach (var partitionId in topicHighWatermark.PartitionIds.DefaultIfEmpty(0).OrderBy(partitionId => partitionId))
         {
-            
             var startPatition = StartBoostrapByPartition(_topic,
                                                          partitionId,
-                                                         null,
-                                                         metadataStorage,
-                                                         topicHighWatermark,
+                                                         topicHighWatermark.GetPartitionHighWatermarkOrThrow(partitionId),
                                                          cancellationToken);
             readerTasks.Add(startPatition);
         }
-        
+        _logger.LogInformation("Starting bootstrap for topic {Topic} across {PartitionCount} partitions.", _topic, topicHighWatermark.PartitionIds);
         await Task.WhenAll(readerTasks);
-
-        _logger.LogInformation("Starting bootstrap for topic {Topic} across {PartitionCount} partitions.", _topic, targetWatermarks.Count);
-
 
         
     }
@@ -234,14 +351,15 @@ public sealed class PulsarTableView<TMessage> : IPulsarTableView<TMessage>
 
     public async Task StartLiveTailAsync(CancellationToken cancellationToken)
     {
-        var startMessageId = _liveTailStartMessageId ?? MessageId.Latest;
+        await Task.CompletedTask;
+        //var startMessageId = _liveTailStartMessageId ?? MessageId.Latest;
 
-        _logger.LogInformation("Starting live tail for topic {Topic} from message id {MessageId}.", _topic, startMessageId);
+        //_logger.LogInformation("Starting live tail for topic {Topic} from message id {MessageId}.", _topic, startMessageId);
 
-        await foreach (var message in _readLiveMessages(startMessageId, cancellationToken).WithCancellation(cancellationToken))
-        {
-            await TryApplyMessageAsync(message, emitEvents: true, cancellationToken);
-        }
+        //await foreach (var message in _readLiveMessages(startMessageId, cancellationToken).WithCancellation(cancellationToken))
+        //{
+        //    await TryApplyMessageAsync(message, emitEvents: true, cancellationToken);
+        //}
     }
 
     [ExcludeFromCodeCoverage]
@@ -301,11 +419,11 @@ public sealed class PulsarTableView<TMessage> : IPulsarTableView<TMessage>
         }
     }
 
-    private static PulsarMessageId SelectLiveTailStartMessageId(IReadOnlyDictionary<int, PulsarMessageId> targetWatermarks)
-    {
-        return targetWatermarks.Values.Aggregate((current, candidate) =>
-            HasReachedOrExceeded(candidate, current) ? candidate : current);
-    }
+    //private static PulsarMessageId SelectLiveTailStartMessageId(IReadOnlyDictionary<int, PulsarMessageId> targetWatermarks)
+    //{
+    //    return targetWatermarks.Values.Aggregate((current, candidate) =>
+    //        HasReachedOrExceeded(candidate, current) ? candidate : current);
+    //}
 
     private static MessageId ToDotPulsarMessageId(PulsarMessageId messageId, string topic)
         => new(checked((ulong)messageId.LedgerId), checked((ulong)messageId.EntryId), messageId.PartitionIndex, messageId.BatchIndex, topic);
@@ -322,63 +440,47 @@ public sealed class PulsarTableView<TMessage> : IPulsarTableView<TMessage>
         return new PulsarMessageId((long)messageId.LedgerId, (long)messageId.EntryId, messageId.Partition, messageId.BatchIndex);
     }
 
-    private async Task<bool> TryApplyMessageAsync(TableViewMessage message, bool emitEvents, CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(message.Key))
-        {
-            _logger.LogWarning("Skipping message without key at {LedgerId}:{EntryId}:{PartitionIndex}.",
-                               message.MessageId.LedgerId, message.MessageId.EntryId, message.MessageId.PartitionIndex);
-            // TODO: save rejected message
-            return false;
-        }
+    //private async Task<bool> TryApplyMessageAsync(TableViewMessage message, bool emitEvents, CancellationToken cancellationToken)
+    //{
+    //    if (string.IsNullOrWhiteSpace(message.Key))
+    //    {
+    //        _logger.LogWarning("Skipping message without key at {LedgerId}:{EntryId}:{PartitionIndex}.",
+    //                           message.MessageId.LedgerId, message.MessageId.EntryId, message.MessageId.PartitionIndex);
+    //        // TODO: save rejected message
+    //        return false;
+    //    }
 
-        if (message.Data.Length == 0)
-        {
-            await WhenArriveTombStone(message.Key, message.MessageId, emitEvents, cancellationToken);
-            return true;
-        }
+    //    if (message.Data.Length == 0)
+    //    {
+    //        await WhenArriveTombStone(message.Key, message.MessageId, emitEvents, cancellationToken);
+    //        return true;
+    //    }
 
-        TMessage incomingValue = _valueDeserializer(message.Data);
-        string key = message.Key!;
+    //    TMessage incomingValue = _valueDeserializer(message.Data);
+    //    string key = message.Key!;
 
-        var capturedOldValue = await _messageStorage.TryLoadAsync(key, cancellationToken);
-        await _messageStorage.UpsertAsync(incomingValue, cancellationToken);
+    //    var capturedOldValue = await _messageStorage.TryLoadAsync(key, cancellationToken);
+    //    await _messageStorage.UpsertAsync(incomingValue, cancellationToken);
 
 
-        if (emitEvents)
-        {
-            if (capturedOldValue == null)
-            {
-                _subject.OnNext(new EventCreated<TMessage>(message.Key, incomingValue));
-            }
-            else
-            {
-                _subject.OnNext(new EventUpdated<TMessage>(message.Key, incomingValue, capturedOldValue!));
-            }
-        }
-        else
-        {
-            _localStorage.AddOrUpdate(message.Key, incomingValue, (_, _) => incomingValue);
-        }
+    //    if (emitEvents)
+    //    {
+    //        if (capturedOldValue == null)
+    //        {
+    //            _subject.OnNext(new EventCreated<TMessage>(message.Key, incomingValue));
+    //        }
+    //        else
+    //        {
+    //            _subject.OnNext(new EventUpdated<TMessage>(message.Key, incomingValue, capturedOldValue!));
+    //        }
+    //    }
+    //    else
+    //    {
+    //        _localStorage.AddOrUpdate(message.Key, incomingValue, (_, _) => incomingValue);
+    //    }
 
-        return true;
-    }
+    //    return true;
+    //}
 
-    private async Task WhenArriveTombStone(string messageKey, PulsarMessageId messageId, bool emitEvents, CancellationToken cancellationToken)
-    {
-        var deletedValue = await _messageStorage.TryLoadAsync(messageKey, cancellationToken);
-        if (deletedValue is not null)
-        {
-            await _messageStorage.DeleteAsync(messageKey, cancellationToken);
-
-            if (emitEvents)
-            {
-                _subject.OnNext(new EventDeleted<TMessage>(messageKey, deletedValue));
-            }
-            else
-            {
-                _localStorage.Remove(messageKey, out _);
-            }
-        }
-    }
+    
 }

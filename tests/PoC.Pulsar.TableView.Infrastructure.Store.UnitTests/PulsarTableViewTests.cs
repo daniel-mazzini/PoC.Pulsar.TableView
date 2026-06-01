@@ -3,7 +3,6 @@ using System.Text;
 using DotPulsar;
 using Microsoft.Extensions.Logging;
 using PoC.Pulsar.TableView.Domain.Storages;
-using PoC.Pulsar.TableView.Infrastructure.Store.Readers;
 using Xunit;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.UnitTests;

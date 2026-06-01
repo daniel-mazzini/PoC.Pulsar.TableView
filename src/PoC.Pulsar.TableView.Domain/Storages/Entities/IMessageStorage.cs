@@ -1,5 +1,3 @@
-using PoC.Pulsar.TableView.Domain.Entities;
-
 namespace PoC.Pulsar.TableView.Domain.Storages.Entities;
 
 public interface IMessageStorage<TKey, TMessage>

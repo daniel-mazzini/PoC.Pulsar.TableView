@@ -2,7 +2,6 @@ using System.Reactive.Subjects;
 using Microsoft.Extensions.Logging.Abstractions;
 using PoC.Pulsar.TableView.Contracts;
 using PoC.Pulsar.TableView.Domain.Storages;
-using PoC.Pulsar.TableView.Processor.Abstraction.Publisher;
 using Xunit;
 
 namespace PoC.Pulsar.TableView.Processor.UnitTests;
