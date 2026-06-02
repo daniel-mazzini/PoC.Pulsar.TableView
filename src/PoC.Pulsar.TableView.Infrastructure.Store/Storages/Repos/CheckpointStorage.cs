@@ -1,7 +1,8 @@
-﻿using PoC.Pulsar.TableView.Domain.Entities;
-using PoC.Pulsar.TableView.Domain.Storages;
-using PoC.Pulsar.TableView.Domain.Storages.Controls;
+﻿using PoC.Pulsar.TableView.Domain.Checkpoints;
+using PoC.Pulsar.TableView.Domain.Metadatas;
+using PoC.Pulsar.TableView.Domain.Serializers;
 using PoC.Pulsar.TableView.Domain.Storages.StateStore;
+using PoC.Pulsar.TableView.Domain.TableView;
 using PoC.Pulsar.TableView.Infrastructure.Store.Storages.Session;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.Storages.Repos;

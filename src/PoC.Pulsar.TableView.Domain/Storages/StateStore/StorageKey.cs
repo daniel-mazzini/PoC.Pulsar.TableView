@@ -1,6 +1,6 @@
 using System.Text;
-using PoC.Pulsar.TableView.Domain.Entities.Categories;
-using PoC.Pulsar.TableView.Domain.Entities.Sports;
+using PoC.Pulsar.TableView.Domain.Categories;
+using PoC.Pulsar.TableView.Domain.Sports;
 
 namespace PoC.Pulsar.TableView.Domain.Storages.StateStore;
 
@@ -35,10 +35,14 @@ public readonly record struct StorageKey(string Value)
     public static StorageKey CategoryEntity(CategoryId categoryId)
        => $"__geo-projector:entity:category:{categoryId.Value}";
     public static StorageKey SportMessage(string sportId)
-        => $"__geo-projector:raw:sport:{sportId}";
+        => $"{SportMessagePrefix}:{sportId}";
+
+    public static StorageKey SportMessagePrefix => $"__geo-projector:raw:sport:";
 
     public static StorageKey CategoryMessage(string categoryId)
         => $"__geo-projector:raw:category:{categoryId}";
+
+    public static StorageKey CategoryMessagePrefix => "__geo-projector:raw:category:";
 
     public static StorageKey CountryTaxonomyMaterializedView(SportId sportId)
         => $"__geo-projector:mv:country-taxonomy:{sportId.Value}";

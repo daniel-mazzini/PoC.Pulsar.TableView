@@ -2,6 +2,10 @@ namespace PoC.Pulsar.TableView.Infrastructure.Store.Storages;
 
 using StateAllocator = SpanByteAllocator<StoreFunctions<SpanByte, SpanByte, SpanByteComparer, SpanByteRecordDisposer>>;
 
+public delegate void TsavoriteScanCallback(ReadOnlySpan<byte> key, ReadOnlySpan<byte> value);
+public delegate void TsavoriteValueScanCallback(ReadOnlySpan<byte> value);
+
+
 public interface ITsavoriteEngine : IDisposable
 {
     Task CompleteWriteAsync(CancellationToken cancellationToken);
@@ -14,4 +18,7 @@ public interface ITsavoriteEngine : IDisposable
     Task FlushAsync(CancellationToken cancellationToken);
     Task<Guid> CheckpointAsync(CancellationToken ct = default);
 
+    void ScanByPrefix(ReadOnlySpan<byte> prefix, TsavoriteScanCallback callback);
+
+    void ScanByPrefixGetValueOnly(ReadOnlySpan<byte> prefix, TsavoriteValueScanCallback callback);
 }

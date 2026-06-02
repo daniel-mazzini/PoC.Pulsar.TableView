@@ -1,6 +1,5 @@
-﻿using PoC.Pulsar.TableView.Domain.Entities;
-using PoC.Pulsar.TableView.Domain.Storages;
-using PoC.Pulsar.TableView.Domain.Storages.Controls;
+﻿using PoC.Pulsar.TableView.Domain.Rejected;
+using PoC.Pulsar.TableView.Domain.Serializers;
 using PoC.Pulsar.TableView.Domain.Storages.StateStore;
 using PoC.Pulsar.TableView.Infrastructure.Store.Storages.Session;
 

@@ -1,17 +1,19 @@
 using DotPulsar;
 using Microsoft.Extensions.Logging;
 using PoC.Pulsar.TableView.Contracts;
-using PoC.Pulsar.TableView.Domain.Entities;
-using PoC.Pulsar.TableView.Domain.Storages;
-using PoC.Pulsar.TableView.Domain.Storages.Controls;
-using PoC.Pulsar.TableView.Domain.Storages.Entities;
-using PoC.Pulsar.TableView.Domain.Storages.Indexes;
+using PoC.Pulsar.TableView.Domain.Categories;
+using PoC.Pulsar.TableView.Domain.MaterializeViews;
+using PoC.Pulsar.TableView.Domain.Metadatas;
+using PoC.Pulsar.TableView.Domain.Projector;
+using PoC.Pulsar.TableView.Domain.Serializers;
 using PoC.Pulsar.TableView.Domain.Storages.StateStore;
 using PoC.Pulsar.TableView.Infrastructure.Store;
 using PoC.Pulsar.TableView.Infrastructure.Store.Publisher;
 using PoC.Pulsar.TableView.Infrastructure.Store.Readers;
 using PoC.Pulsar.TableView.Infrastructure.Store.Serialization;
 using PoC.Pulsar.TableView.Infrastructure.Store.Storages;
+using PoC.Pulsar.TableView.Infrastructure.Store.Storages.Repos;
+using PoC.Pulsar.TableView.Infrastructure.Store.Storages.UnitOfWorks;
 using PoC.Pulsar.TableView.Processor;
 using PoC.Pulsar.TableView.Processor.Configuration;
 
@@ -51,6 +53,7 @@ loggerFactory.CreateLogger<Program>()
 // Message serialization
 AvroSchemaRegistry avroSchemaRegistry = new AvroSchemaRegistry();
 avroSchemaRegistry.Register<SportMessage>("./Schemas/SportMessage");
+avroSchemaRegistry.Register<RawCategoryMessage>("./Schemas/RawCategoryMessage");
 var avroSerializer = avroSchemaRegistry.Build();
 
 // Metadata storage
@@ -62,34 +65,41 @@ IUnitOfWorkFactory unitOfWorkFactory = new UnitOfWorkFactory(tsavoriteEngine, me
 
 IProjectorTopicReaderFactory readerFactory = new DotPulsarProjectorTopicReaderFactory(client, options.InputNamespace);
 
-await using var projectorPublisher = new DotPulsarPropertyTaxonomyViewPublisher(client,options.OutputNamespace,avroSerializer);
+await using var projectorPublisher = new DotPulsarPropertyTaxonomyViewPublisher(client, options.OutputNamespace, avroSerializer);
 await using var rejectedPublisher = new DotPulsarRejectedMessagePublisher(client, options.OutputNamespace, avroSerializer);
+
+
+ITableViewMessageApplier<SportMessage> projectorMessageApplier = new SportMessageApplier(rejectedPublisher);
+ITableViewMessageApplier<RawCategoryMessage> categoryMessageApplier = new RawCategoryMessageApplier(rejectedPublisher);
 
 var sportsView = new PulsarTableView<SportMessage>(
     BuildTopic(inputNamespace, PulsarTopics.Sports),
     readerFactory,
-    rejectedPublisher,
     unitOfWorkFactory,
     avroSerializer,
+    projectorMessageApplier,
     metadata,
     loggerFactory.CreateLogger<PulsarTableView<SportMessage>>());
 
-ICategoryMessageStorage categoryStore = new CategoryMessageStorage(tsavoriteEngine, serializer);
-var categoryDeserializer = new DefaultAvroSerializer<RawCategoryMessage>("RawCategoryMessage.avsc");
 var categoriesView = new PulsarTableView<RawCategoryMessage>(
-    client,
     BuildTopic(inputNamespace, PulsarTopics.Categories),
-    categoryDeserializer.Deserialize,
-    categoryStore,
+    readerFactory,
+    unitOfWorkFactory,
+    avroSerializer,
+    categoryMessageApplier,
+    metadata,
     loggerFactory.CreateLogger<PulsarTableView<RawCategoryMessage>>());
 
-ICategoryBySportIndex categoryBySportIndex;
-IOrphanCategoryBySportIndex orphanCategoryBySportIndex;
+ICategoryBySportIndex categoryBySportIndex = new InMemoryCategoryBySportIndex();
+IOrphanCategoryBySportIndex orphanCategoryBySportIndex = new InMemoryOrphanCategoryBySportIndex();
+IGeoTaxonomyViewStorage taxonomyViewStorage = new InMemoryGeoTaxonomyViewStorage();
 var processor = new GeoTaxonomyProcessor(
     sportsView,
     categoriesView,
-    publisher,
-    //new TaxonomyViewPublisher(client, BuildTopic("public/tableview-outputs", "taxonomy-view"), new DefaultAvroSerializer<GeoTaxonomyViewMessage>("GeoTaxonomyViewMessage.avsc")),
+    projectorPublisher,
+    categoryBySportIndex,
+    orphanCategoryBySportIndex,
+    taxonomyViewStorage,
     loggerFactory.CreateLogger<GeoTaxonomyProcessor>());
 
 await processor.RunAsync(cts.Token);

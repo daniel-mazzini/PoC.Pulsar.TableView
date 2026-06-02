@@ -1,18 +1,23 @@
-﻿using PoC.Pulsar.TableView.Domain.Storages;
+﻿using PoC.Pulsar.TableView.Domain.Serializers;
 using PoC.Pulsar.TableView.Domain.Storages.StateStore;
 using PoC.Pulsar.TableView.Infrastructure.Store.Observability;
 using System.Buffers;
+using System.Collections.Generic;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.Storages;
+
+using static System.Runtime.InteropServices.JavaScript.JSType;
 using StateAllocator = SpanByteAllocator<StoreFunctions<SpanByte, SpanByte, SpanByteComparer, SpanByteRecordDisposer>>;
 public abstract class TsavoriteRepositoryBase
 {
     private readonly IStateSerializer _serializer;
+
+    protected IStateSerializer Serializer => _serializer;
+
     protected TsavoriteRepositoryBase(IStateSerializer serializer)
     {
         _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
     }
-
 
     protected ValueTask<T?> ReadFromSessionAsync<T, TInput, TOutput, TFunctions>(ClientSession<SpanByte, SpanByte, TInput, TOutput, Empty, TFunctions, StoreFunctions<SpanByte, SpanByte, SpanByteComparer, SpanByteRecordDisposer>, StateAllocator> session,
                                                                                          StorageKey key,
@@ -56,7 +61,7 @@ public abstract class TsavoriteRepositoryBase
                 throw new InvalidOperationException($"Tsavorite read for '{key}' failed with status '{status}'.");
             }
 
-            var value = _serializer.Deserialize<T>(ExtractReadOnlySpan(output));
+            var value = Serializer.Deserialize<T>(ExtractReadOnlySpan(output));
             activity?.SetTag("result", "success");
             return ValueTask.FromResult<T?>(value);
         }
@@ -65,7 +70,6 @@ public abstract class TsavoriteRepositoryBase
             ArrayPool<byte>.Shared.Return(rentedArray);
         }
     }
-
     
     protected ValueTask UpsertIntoSessionAsync<T, TInput, TOutput, TFunctions>(
         ClientSession<SpanByte, SpanByte, TInput, TOutput, Empty, TFunctions, StoreFunctions<SpanByte, SpanByte, SpanByteComparer, SpanByteRecordDisposer>, StateAllocator> session,
@@ -76,7 +80,7 @@ public abstract class TsavoriteRepositoryBase
         where TFunctions : ISessionFunctions<SpanByte, SpanByte, TInput, TOutput, Empty>
     {
         using var activity = ProjectorStoreTelemetry.StartActivity("Tsavorite Upsert", operation: "Upsert");
-        UpsertSerializedIntoSession(session, key, input, _serializer.Serialize(value));
+        UpsertSerializedIntoSession(session, key, input, Serializer.Serialize(value));
         activity?.SetTag("result", "success");
         return ValueTask.CompletedTask;
     }

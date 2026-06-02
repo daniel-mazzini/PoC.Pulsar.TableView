@@ -17,6 +17,7 @@ using StateSession = Tsavorite.core.ClientSession<
 internal interface ITsavoriteSessionProvider : IStateSession
 {
     StateSession GetLightSession();
+    ITsavoriteEngine Engine { get; }
     ClientSession<SpanByte, SpanByte, TInput, TOutput, Empty, TFunctions, StoreFunctions<SpanByte, SpanByte, SpanByteComparer, SpanByteRecordDisposer>, StateAllocator> GetSession<TInput, TOutput, TFunctions>(TFunctions customFunctions = null)
         where TFunctions : SessionFunctionsBase<SpanByte, SpanByte, TInput, TOutput, Empty>;
 }

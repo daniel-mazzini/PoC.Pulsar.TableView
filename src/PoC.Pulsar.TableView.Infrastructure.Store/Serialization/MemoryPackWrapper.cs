@@ -1,5 +1,5 @@
 ﻿using MemoryPack;
-using PoC.Pulsar.TableView.Domain.Storages;
+using PoC.Pulsar.TableView.Domain.Serializers;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.Serialization;
 

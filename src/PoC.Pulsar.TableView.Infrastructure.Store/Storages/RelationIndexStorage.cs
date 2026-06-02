@@ -1,4 +1,4 @@
-﻿using PoC.Pulsar.TableView.Domain.Storages;
+﻿using PoC.Pulsar.TableView.Domain.Serializers;
 using PoC.Pulsar.TableView.Domain.Storages.StateStore;
 using System.Buffers;
 using System.Collections.Generic;

@@ -1,7 +1,14 @@
 using System.Reactive.Subjects;
 using Microsoft.Extensions.Logging.Abstractions;
 using PoC.Pulsar.TableView.Contracts;
-using PoC.Pulsar.TableView.Domain.Storages;
+using PoC.Pulsar.TableView.Domain.Categories;
+using PoC.Pulsar.TableView.Domain.Filter;
+using PoC.Pulsar.TableView.Domain.MaterializeViews;
+using PoC.Pulsar.TableView.Domain.Projector;
+using PoC.Pulsar.TableView.Domain.Sports;
+using PoC.Pulsar.TableView.Domain.TableView;
+using PoC.Pulsar.TableView.Infrastructure.Store.Serialization;
+using PoC.Pulsar.TableView.Infrastructure.Store.Storages;
 using Xunit;
 
 namespace PoC.Pulsar.TableView.Processor.UnitTests;
@@ -40,11 +47,11 @@ public sealed class GeoTaxonomyProcessorTests
         var processor = CreateProcessor(sports, categories, publisher);
 
         await using var runner = await ProcessorRunner.StartAsync(processor, sports, categories);
-        sports.EmitUpdate("sport-1", Sport("sport-1", "Soccer", "SOCCER"));
+        sports.EmitUpdate("sport-1", Sport("sport-1", "Soccer Updated", "SOCCER"), Sport("sport-1", "Soccer", "SOCCER"));
         var taxonomy = await publisher.WaitForPublishedCountAsync(1);
 
         Assert.Equal("sport-1", taxonomy[0].SportId);
-        Assert.Equal("Soccer", taxonomy[0].SportName);
+        Assert.Equal("Soccer Updated", taxonomy[0].SportName);
         Assert.Equal("SOCCER", taxonomy[0].SportType);
         Assert.Equal(["ES"], taxonomy[0].GeoCategories.Select(category => category.CountryCode));
     }
@@ -63,7 +70,7 @@ public sealed class GeoTaxonomyProcessorTests
         var processor = CreateProcessor(sports, categories, publisher);
 
         await using var runner = await ProcessorRunner.StartAsync(processor, sports, categories);
-        sports.EmitUpdate("sport-1", Sport("sport-1", "Soccer", "SOCCER"));
+        sports.EmitUpdate("sport-1", Sport("sport-1", "Soccer Updated", "SOCCER"), Sport("sport-1", "Soccer", "SOCCER"));
         var taxonomy = await publisher.WaitForPublishedCountAsync(1);
 
         Assert.Equal(["ES", "US"], taxonomy[0].GeoCategories.Select(category => category.CountryCode).OrderBy(code => code));
@@ -78,7 +85,7 @@ public sealed class GeoTaxonomyProcessorTests
         var processor = CreateProcessor(sports, categories, publisher);
 
         await using var runner = await ProcessorRunner.StartAsync(processor, sports, categories);
-        sports.EmitDelete("sport-1");
+        sports.EmitDelete("sport-1", Sport("sport-1", "Soccer", "SOCCER"));
         var tombstones = await publisher.WaitForDeletedCountAsync(1);
 
         Assert.Equal(["sport-1"], tombstones);
@@ -94,9 +101,10 @@ public sealed class GeoTaxonomyProcessorTests
         var processor = CreateProcessor(sports, categories, publisher);
 
         await using var runner = await ProcessorRunner.StartAsync(processor, sports, categories);
+        var oldCategory = Category("category-es", "sport-1", null);
+        categories.Upsert(oldCategory.Id, oldCategory);
         var category = Category("category-es", "sport-1", "ES");
-        categories.Upsert(category.Id, category);
-        categories.EmitUpdate(category.Id, category);
+        categories.EmitUpdate(category.Id, category, oldCategory);
         var taxonomy = await publisher.WaitForPublishedCountAsync(1);
 
         Assert.Equal("sport-1", taxonomy[0].SportId);
@@ -119,7 +127,7 @@ public sealed class GeoTaxonomyProcessorTests
         await using var runner = await ProcessorRunner.StartAsync(processor, sports, categories);
         var movedCategory = Category("category-es", "sport-2", "ES");
         categories.Upsert(movedCategory.Id, movedCategory);
-        categories.EmitUpdate(movedCategory.Id, movedCategory);
+        categories.EmitUpdate(movedCategory.Id, movedCategory, existingCategory);
         var taxonomies = await publisher.WaitForPublishedCountAsync(2);
 
         Assert.Equal(["sport-1", "sport-2"], taxonomies.Select(taxonomy => taxonomy.SportId));
@@ -138,7 +146,7 @@ public sealed class GeoTaxonomyProcessorTests
 
         await using var runner = await ProcessorRunner.StartAsync(processor, sports, categories);
         categories.Delete(existingCategory.Id);
-        categories.EmitDelete(existingCategory.Id);
+        categories.EmitDelete(existingCategory.Id, existingCategory);
         var taxonomies = await publisher.WaitForPublishedCountAsync(1);
 
         Assert.Equal("sport-1", taxonomies[0].SportId);
@@ -154,7 +162,7 @@ public sealed class GeoTaxonomyProcessorTests
         var processor = CreateProcessor(sports, categories, publisher);
 
         await using var runner = await ProcessorRunner.StartAsync(processor, sports, categories);
-        categories.EmitDelete("missing-category");
+        categories.EmitDelete("missing-category", Category("missing-category", "sport-1", null));
         await Task.Delay(50);
 
         Assert.Empty(publisher.PublishedTaxonomies);
@@ -166,10 +174,17 @@ public sealed class GeoTaxonomyProcessorTests
         IPulsarTableView<RawCategoryMessage> categories,
         ITaxonomyViewPublisher publisher)
     {
+        ICategoryBySportIndex relationIndex = new InMemoryCategoryBySportIndex();
+        IOrphanCategoryBySportIndex pendingIndex = new InMemoryOrphanCategoryBySportIndex();
+        IGeoTaxonomyViewStorage materializeViewStorage = new InMemoryGeoTaxonomyViewStorage();
+
         return new GeoTaxonomyProcessor(
             sports,
             categories,
             publisher,
+            relationIndex,
+            pendingIndex,
+            materializeViewStorage,
             NullLogger<GeoTaxonomyProcessor>.Instance);
     }
 
@@ -202,7 +217,7 @@ public sealed class GeoTaxonomyProcessorTests
         where T : class
     {
         private readonly Dictionary<string, T> _items = new(StringComparer.Ordinal);
-        private readonly Subject<Event<T>> _updates = new();
+        private readonly Subject<TableEntryChange<T>> _updates = new();
         private readonly TaskCompletionSource _liveTailStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public FakePulsarTableView(IReadOnlyList<T>? items = null)
@@ -219,7 +234,7 @@ public sealed class GeoTaxonomyProcessorTests
             }
         }
 
-        public IObservable<Event<T>> OnUpdate => _updates;
+        public IObservable<TableEntryChange<T>> OnChanges => _updates;
 
         public bool BootstrapCompleted { get; private set; }
 
@@ -230,10 +245,27 @@ public sealed class GeoTaxonomyProcessorTests
             return _items.GetValueOrDefault(key);
         }
 
+        public ValueTask<T?> GetEntry(string key, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(Get(key));
+        }
+
+        public IDictionary<string, T> GetSnapshot(IValuePredicate<T>? filter = null)
+        {
+            if (filter is null)
+            {
+                return new Dictionary<string, T>(_items, StringComparer.Ordinal);
+            }
+
+            return _items.Where(entry => filter.Match(entry.Value))
+                         .ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.Ordinal);
+        }
+
         public async IAsyncEnumerable<T> GetAllAsync(
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            foreach (var item in _items.Values.ToArray())
+            foreach (var item in GetSnapshot().Values.ToArray())
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 yield return item;
@@ -241,10 +273,10 @@ public sealed class GeoTaxonomyProcessorTests
             }
         }
 
-        public Task StartBootstrapAsync(CancellationToken cancellationToken = default)
+        public Task<TopicBootstrapResult<T>> StartBootstrapAsync(CancellationToken cancellationToken = default)
         {
             BootstrapCompleted = true;
-            return Task.CompletedTask;
+            return Task.FromResult<TopicBootstrapResult<T>>(new TopicHighWatermarkNotFound<T>());
         }
 
         public async Task StartLiveTailAsync(CancellationToken cancellationToken)
@@ -271,12 +303,23 @@ public sealed class GeoTaxonomyProcessorTests
 
         public void EmitUpdate(string key, T value, T oldValue)
         {
-            _updates.OnNext(new EventUpdated<T>(key, value, oldValue));
+            _updates.OnNext(new TableEntryUpdated<T>(key, value, oldValue));
+        }
+
+        public void EmitUpdate(string key, T value)
+        {
+            _updates.OnNext(new TableEntryUpdated<T>(key, value, value));
         }
 
         public void EmitDelete(string key, T value)
         {
-            _updates.OnNext(new EventDeleted<T>(key,value));
+            _updates.OnNext(new EventDeleted<T>(key, value));
+        }
+
+        public void EmitDelete(string key)
+        {
+            var value = Get(key) ?? throw new InvalidOperationException($"Missing item for key {key}.");
+            _updates.OnNext(new EventDeleted<T>(key, value));
         }
 
         
@@ -303,7 +346,12 @@ public sealed class GeoTaxonomyProcessorTests
             return ValueTask.CompletedTask;
         }
 
-        public ValueTask PublishDeleteMessageAsync(string sportId, CancellationToken cancellationToken)
+        public ValueTask PublishListMessage(IEnumerable<GeoTaxonomyViewMessage> taxonomies, CancellationToken cancellationToken)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask PublishDeleteMessageAsync(string sportId, DateTimeOffset eventTimestamp, CancellationToken cancellationToken)
         {
             lock (_gate)
             {

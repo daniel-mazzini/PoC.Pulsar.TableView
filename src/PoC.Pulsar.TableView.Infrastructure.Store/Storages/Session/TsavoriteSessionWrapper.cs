@@ -1,6 +1,4 @@
-﻿using PoC.Pulsar.TableView.Domain.Storages.StateStore;
-
-namespace PoC.Pulsar.TableView.Infrastructure.Store.Storages.Session;
+﻿namespace PoC.Pulsar.TableView.Infrastructure.Store.Storages.Session;
 
 using StateAllocator = SpanByteAllocator<StoreFunctions<SpanByte, SpanByte, SpanByteComparer, SpanByteRecordDisposer>>;
 using StateSession = ClientSession<
@@ -21,6 +19,8 @@ public class TsavoriteSessionWrapper : ITsavoriteSessionProvider
     private bool _disposed;
 
     public Guid SessionId { get; }
+
+    public ITsavoriteEngine Engine => _engine;
 
     public TsavoriteSessionWrapper(ITsavoriteEngine engine)
     {

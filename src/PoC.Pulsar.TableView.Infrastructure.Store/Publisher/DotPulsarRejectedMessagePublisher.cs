@@ -3,11 +3,12 @@ using DotPulsar.Abstractions;
 using DotPulsar.Extensions;
 using Microsoft.IO;
 using PoC.Pulsar.TableView.Contracts;
-using PoC.Pulsar.TableView.Domain.Entities;
+using PoC.Pulsar.TableView.Domain.Rejected;
+using PoC.Pulsar.TableView.Domain.Serializers;
 using PoC.Pulsar.TableView.Infrastructure.Store.Observability;
 using PoC.Pulsar.TableView.Infrastructure.Store.Readers;
-using PoC.Pulsar.TableView.Infrastructure.Store.Serialization;
 using System.Buffers;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
@@ -32,39 +33,39 @@ public sealed class DotPulsarRejectedMessagePublisher : IRejectedMessagePublishe
         _avroSerializer = avroSerializer;
     }
 
-    public async Task PublishAsync(RejectedMessageWrite write, CancellationToken cancellationToken)
+    public async Task PublishAsync<TMessage>(RejectedMessage<TMessage> write, Dictionary<string, string> headers, CancellationToken cancellationToken)
     {
         using var activity = ProjectorStoreTelemetry.StartActivity("projection.rejected.publish",
                                                                    PulsarTopics.CountryTaxonomyViews,
                                                                    operation: "Publish");
-        activity?.SetTag("entity_type", "rejected_entity_view");
-        activity?.SetTag("message_type", nameof(RejectedMessageWrite));
+        activity?.SetTag("message_type", nameof(RejectedMessage<TMessage>));
         
 
         var metadata = new MessageMetadata
                                 {
-                                    Key = write.MessageKey,
-                                    EventTimeAsDateTimeOffset = write.Timestamp,
+                                    Key = write.OriginalMessageKey,
+                                    EventTimeAsDateTimeOffset = write.RejectedAt,
                                     DeliverAtTimeAsDateTimeOffset = DateTimeOffset.UtcNow
                                 };
-        foreach (var h in write.Headers) metadata[h.Key] = h.Value;
-        var producer = write.Topic == PulsarTopics.SportsRejected ? _sportRejectedProducer : _categoryRejectedProducer;
-        activity?.SetTag("event_type", write.Topic == PulsarTopics.SportsRejected ? "sport-rejected" : "category-rejected");
+        foreach (var h in headers) metadata[h.Key] = h.Value;
+        var producer = write.OriginalTopic == PulsarTopics.Sports ? _sportRejectedProducer : _categoryRejectedProducer;
+        activity?.SetTag("event_type", write.OriginalTopic == PulsarTopics.SportsRejected ? "sport-rejected" : "category-rejected");
 
         await SendOne(producer, write, activity, metadata, cancellationToken);
     }
     private const int memory_1K = 1024;
-    private async Task SendOne(IProducer<ReadOnlySequence<byte>> producer, RejectedMessageWrite message, Activity? activity, MessageMetadata metadata, CancellationToken cancellationToken)
+    private async Task SendOne<TMessage>(IProducer<ReadOnlySequence<byte>> producer, RejectedMessage<TMessage> message, Activity? activity, MessageMetadata metadata, CancellationToken cancellationToken)
     {
         byte[] buffer = ArrayPool<byte>.Shared.Rent(memory_1K);
         try
         {
             using var stream = new MemoryStream(buffer);
-            Serialize(message, stream);
+            _avroSerializer.Serialize(message, stream);
             int bytesWritten = (int)stream.Position;
             var sequence = new ReadOnlySequence<byte>(buffer.AsMemory(0, bytesWritten));
             await producer.Send(metadata, sequence, cancellationToken);
             activity?.SetTag("result", "success");
+            return;
         }
         catch (NotSupportedException)
         {
@@ -82,29 +83,14 @@ public sealed class DotPulsarRejectedMessagePublisher : IRejectedMessagePublishe
         }
         // not so good performance, but more secure option, used as fallback 
         using RecyclableMemoryStream dynamicStream = MemoryManager.Instance.GetStream();
-        Serialize(message, dynamicStream);
+        _avroSerializer.Serialize(message, dynamicStream);
         await producer.Send(metadata, dynamicStream.GetReadOnlySequence(), cancellationToken);
         activity?.SetTag("result", "success_slowpath");
-    }
-    private void Serialize(RejectedMessageWrite write, Stream stream)
-    {
-        switch (write.Message)
-        {
-            case SportRejectedMessage sm:
-                _avroSerializer.Serialize(sm, stream);
-                break;
-
-            case CategoryRejectedMessage cm:
-                _avroSerializer.Serialize(cm, stream);
-                break;
-
-            default:
-                throw new InvalidOperationException($"Type not expected '{write.Message.GetType().Name}'");
-        }
     }
     public async ValueTask DisposeAsync()
     {
         await _sportRejectedProducer.DisposeAsync();
         await _categoryRejectedProducer.DisposeAsync();
     }
+
 }

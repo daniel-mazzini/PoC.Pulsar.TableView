@@ -10,6 +10,6 @@ public class GeoCategoryMessageFilter : IValuePredicate<RawCategoryMessage>
 
     public bool Match(RawCategoryMessage value)
     {
-        return value.CountryCode is not null;
+        return !string.IsNullOrWhiteSpace(value.CountryCode);
     }
 }

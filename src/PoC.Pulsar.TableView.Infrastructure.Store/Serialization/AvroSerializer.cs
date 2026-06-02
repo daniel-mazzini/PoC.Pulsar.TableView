@@ -1,5 +1,6 @@
 ﻿using Chr.Avro.Abstract;
 using Chr.Avro.Serialization;
+using PoC.Pulsar.TableView.Domain.Serializers;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Collections.Immutable;
@@ -26,14 +27,14 @@ public class AvroSerializer : IAvroSerializer
 
     public void Serialize<T>(T message, Stream output)
     {
-        var serializerAction = (Action<T, BinaryWriter>)_serializationCache.GetOrAdd(typeof(T), _ =>
+        var serializerAction = (Delegate)_serializationCache.GetOrAdd(typeof(T), _ =>
         {
             var schema = GetSchema<T>();
             return _serializerBuilder.BuildDelegate<T>(schema);
         });
 
         var writer = new BinaryWriter(output);
-        serializerAction(message, writer);
+        serializerAction.DynamicInvoke(message, writer);
     }
     public T Deserialize<T>(ReadOnlySequence<byte> data)
     {

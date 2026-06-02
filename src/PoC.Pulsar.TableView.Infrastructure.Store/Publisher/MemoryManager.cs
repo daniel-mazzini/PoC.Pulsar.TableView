@@ -4,6 +4,6 @@ namespace PoC.Pulsar.TableView.Infrastructure.Store.Publisher;
 
 public static class MemoryManager
 {
-    // Forma correcta sin DI: Estático y de solo lectura
+    // this SHOULD be singleton
     public static readonly RecyclableMemoryStreamManager Instance = new();
 }

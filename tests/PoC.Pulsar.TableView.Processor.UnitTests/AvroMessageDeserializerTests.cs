@@ -2,6 +2,8 @@ using System.Buffers;
 using System.IO.Pipelines;
 using Microsoft.IO;
 using PoC.Pulsar.TableView.Contracts;
+using PoC.Pulsar.TableView.Domain.Serializers;
+using PoC.Pulsar.TableView.Infrastructure.Store.Serialization;
 using Xunit;
 
 namespace PoC.Pulsar.TableView.Processor.UnitTests;
@@ -13,7 +15,7 @@ public sealed class AvroMessageDeserializerTests
     [Fact]
     public void serialize_and_deserialize_should_round_trip_sport_message()
     {
-        var serializer = new DefaultAvroSerializer<SportMessage>("SportMessage.avsc");
+        var serializer = CreateSerializer<SportMessage>("SportMessage.avsc");
         var message = new SportMessage
         {
             Id = "sport-1",
@@ -34,8 +36,8 @@ public sealed class AvroMessageDeserializerTests
             ]
         };
 
-        var bytes = serializer.Serialize(message);
-        var roundTrip = serializer.Deserialize(new ReadOnlySequence<byte>(bytes));
+        var bytes = serialize_to_bytes(serializer, message);
+        var roundTrip = serializer.Deserialize<SportMessage>(new ReadOnlySequence<byte>(bytes));
 
         Assert.Equal(message.Id, roundTrip.Id);
         Assert.Equal(message.Provider, roundTrip.Provider);
@@ -50,7 +52,7 @@ public sealed class AvroMessageDeserializerTests
     [Fact]
     public async Task byte_array_pipe_writer_array_pool_stream_and_recyclable_stream_serialization_should_match_for_sport_message()
     {
-        var serializer = new DefaultAvroSerializer<SportMessage>("SportMessage.avsc");
+        var serializer = CreateSerializer<SportMessage>("SportMessage.avsc");
         var message = new SportMessage
         {
             Id = "sport-1",
@@ -71,11 +73,11 @@ public sealed class AvroMessageDeserializerTests
             ]
         };
 
-        var byteArrayBytes = serializer.Serialize(message);
+        var byteArrayBytes = serialize_to_bytes(serializer, message);
         var pipeWriterBytes = await serialize_with_pipe_writer(serializer, message);
         var streamBytes = serialize_with_array_pool_stream(serializer, message);
         var recyclableStreamBytes = serialize_with_recyclable_memory_stream(serializer, message);
-        var roundTrip = serializer.Deserialize(new ReadOnlySequence<byte>(pipeWriterBytes));
+        var roundTrip = serializer.Deserialize<SportMessage>(new ReadOnlySequence<byte>(pipeWriterBytes));
 
         Assert.Equal(byteArrayBytes, pipeWriterBytes);
         Assert.Equal(byteArrayBytes, streamBytes);
@@ -93,7 +95,7 @@ public sealed class AvroMessageDeserializerTests
     [Fact]
     public async Task byte_array_pipe_writer_array_pool_stream_and_recyclable_stream_serialization_should_match_for_raw_category_message()
     {
-        var serializer = new DefaultAvroSerializer<RawCategoryMessage>("RawCategoryMessage.avsc");
+        var serializer = CreateSerializer<RawCategoryMessage>("RawCategoryMessage.avsc");
         var message = new RawCategoryMessage
         {
             Id = "category-1",
@@ -118,11 +120,11 @@ public sealed class AvroMessageDeserializerTests
             ]
         };
 
-        var byteArrayBytes = serializer.Serialize(message);
+        var byteArrayBytes = serialize_to_bytes(serializer, message);
         var pipeWriterBytes = await serialize_with_pipe_writer(serializer, message);
         var streamBytes = serialize_with_array_pool_stream(serializer, message);
         var recyclableStreamBytes = serialize_with_recyclable_memory_stream(serializer, message);
-        var roundTrip = serializer.Deserialize(new ReadOnlySequence<byte>(pipeWriterBytes));
+        var roundTrip = serializer.Deserialize<RawCategoryMessage>(new ReadOnlySequence<byte>(pipeWriterBytes));
 
         Assert.Equal(byteArrayBytes, pipeWriterBytes);
         Assert.Equal(byteArrayBytes, streamBytes);
@@ -144,7 +146,7 @@ public sealed class AvroMessageDeserializerTests
     [Fact]
     public async Task byte_array_pipe_writer_array_pool_stream_and_recyclable_stream_serialization_should_match_for_geo_taxonomy_view_message()
     {
-        var serializer = new DefaultAvroSerializer<GeoTaxonomyViewMessage>("GeoTaxonomyViewMessage.avsc");
+        var serializer = CreateSerializer<GeoTaxonomyViewMessage>("GeoTaxonomyViewMessage.avsc");
         var message = GeoTaxonomyViewMessage.Create(
             new SportMessage
             {
@@ -155,11 +157,11 @@ public sealed class AvroMessageDeserializerTests
             [new GeoTaxonomyNode("category-1", "GB"), new GeoTaxonomyNode("category-2", "ES")],
             version: 3);
 
-        var byteArrayBytes = serializer.Serialize(message);
+        var byteArrayBytes = serialize_to_bytes(serializer, message);
         var pipeWriterBytes = await serialize_with_pipe_writer(serializer, message);
         var streamBytes = serialize_with_array_pool_stream(serializer, message);
         var recyclableStreamBytes = serialize_with_recyclable_memory_stream(serializer, message);
-        var roundTrip = serializer.Deserialize(new ReadOnlySequence<byte>(pipeWriterBytes));
+        var roundTrip = serializer.Deserialize<GeoTaxonomyViewMessage>(new ReadOnlySequence<byte>(pipeWriterBytes));
 
         Assert.Equal(byteArrayBytes, pipeWriterBytes);
         Assert.Equal(byteArrayBytes, streamBytes);
@@ -172,12 +174,33 @@ public sealed class AvroMessageDeserializerTests
         Assert.Equal(["ES", "GB"], roundTrip.GeoCategories.Select(category => category.CountryCode).OrderBy(code => code));
     }
 
-    private static async Task<byte[]> serialize_with_pipe_writer<T>(DefaultAvroSerializer<T> serializer, T message)
+    private static IAvroSerializer CreateSerializer<T>(string schemaName)
+        where T : class
+    {
+        var registry = new AvroSchemaRegistry();
+        registry.Register<T>(Path.Combine("Schemas", schemaName));
+        return registry.Build();
+    }
+
+    private static byte[] serialize_to_bytes<T>(IAvroSerializer serializer, T message)
+        where T : class
+    {
+        using var stream = new MemoryStream();
+        serializer.Serialize(message, stream);
+        return stream.ToArray();
+    }
+
+    private static async Task<byte[]> serialize_with_pipe_writer<T>(IAvroSerializer serializer, T message)
         where T : class
     {
         var pipe = new Pipe(new PipeOptions(pauseWriterThreshold: 0));
 
-        serializer.Serialize(message, pipe.Writer);
+        using (var stream = pipe.Writer.AsStream())
+        {
+            serializer.Serialize(message, stream);
+            stream.Flush();
+        }
+
         await pipe.Writer.CompleteAsync();
 
         var result = await pipe.Reader.ReadAsync();
@@ -193,7 +216,7 @@ public sealed class AvroMessageDeserializerTests
         }
     }
 
-    private static byte[] serialize_with_array_pool_stream<T>(DefaultAvroSerializer<T> serializer, T message)
+    private static byte[] serialize_with_array_pool_stream<T>(IAvroSerializer serializer, T message)
         where T : class
     {
         var buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
@@ -211,7 +234,7 @@ public sealed class AvroMessageDeserializerTests
         }
     }
 
-    private static byte[] serialize_with_recyclable_memory_stream<T>(DefaultAvroSerializer<T> serializer, T message)
+    private static byte[] serialize_with_recyclable_memory_stream<T>(IAvroSerializer serializer, T message)
         where T : class
     {
         using var stream = (RecyclableMemoryStream)StreamManager.GetStream();

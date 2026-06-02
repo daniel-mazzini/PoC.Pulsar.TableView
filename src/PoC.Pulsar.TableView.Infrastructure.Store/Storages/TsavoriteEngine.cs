@@ -1,4 +1,4 @@
-﻿using PoC.Pulsar.TableView.Domain.Storages;
+﻿using PoC.Pulsar.TableView.Domain.Serializers;
 using PoC.Pulsar.TableView.Infrastructure.Store.Serialization;
 using System.Buffers;
 using System.IO;
@@ -98,6 +98,48 @@ public sealed class TsavoriteEngine : ITsavoriteEngine
 
         return token;
     }
+    public void ScanByPrefix(ReadOnlySpan<byte> prefix, TsavoriteScanCallback callback)
+    {
+        var beginAddress = _store.Log.BeginAddress;
+        var tailAddress = _store.Log.TailAddress;
+
+        using var iterator = _store.Log.Scan(beginAddress, tailAddress);
+
+        while (iterator.GetNext(out var recordInfo))
+        {
+            if (recordInfo.Tombstone) continue;
+
+            ref SpanByte key = ref iterator.GetKey();
+            ReadOnlySpan<byte> keySpan = key.AsReadOnlySpan();
+
+            if (keySpan.StartsWith(prefix))
+            {
+                ref SpanByte value = ref iterator.GetValue();
+                callback(keySpan, value.AsReadOnlySpan());
+            }
+        }
+    }
+    public void ScanByPrefixGetValueOnly(ReadOnlySpan<byte> prefix, TsavoriteValueScanCallback callback)
+    {
+        var beginAddress = _store.Log.BeginAddress;
+        var tailAddress = _store.Log.TailAddress;
+
+        using var iterator = _store.Log.Scan(beginAddress, tailAddress);
+
+        while (iterator.GetNext(out var recordInfo))
+        {
+            if (recordInfo.Tombstone) continue;
+
+            ref SpanByte key = ref iterator.GetKey();
+
+            if (key.AsReadOnlySpan().StartsWith(prefix))
+            {
+                ref SpanByte value = ref iterator.GetValue();
+                callback(value.AsReadOnlySpan());
+            }
+        }
+    }
+
     private async Task TakeDurableCheckpointAsync(CancellationToken cancellationToken)
     {
         await _checkpointLock.WaitAsync(cancellationToken);
@@ -183,6 +225,8 @@ public sealed class TsavoriteEngine : ITsavoriteEngine
     {
         throw new NotImplementedException();
     }
+
+    
 
     private sealed class DeferredCheckpointScope : IDisposable
     {

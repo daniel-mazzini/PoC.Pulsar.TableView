@@ -1,17 +1,18 @@
+using System.Security.Cryptography;
+
 namespace PoC.Pulsar.TableView.Contracts;
 
-public sealed record SportRejectedMessage(
-    Guid Id,
+public sealed record RejectedMessage<T>(
+    Guid RejectedId,
     string OriginalTopic,
+    int OriginalPartitionId,
+    string OriginalBrokerMessageId,
     string OriginalMessageKey,
-    string OriginalPulsarMessageId,
-    string OriginalMessageType,
-    string OriginalEventType,
-    string OriginalKey,
-    string ReasonCode,
-    string Reason,
-    SportMessage OriginalPayload,
+    RejectedReasonMessage Reason,
+    T? OriginalPayload,
     DateTimeOffset RejectedAt,
-    string CorrelationId,
-    string CausationId,
-    string MessageId);
+    string? OriginalCorrelationId,
+    string? OriginalCausationId,
+    string? OriginalMessageId);
+
+public sealed record RejectedReasonMessage(string ReasonCode, string Reason);

@@ -1,5 +1,5 @@
-using PoC.Pulsar.TableView.Domain.Entities.Categories;
-using PoC.Pulsar.TableView.Domain.Entities.Sports;
+using PoC.Pulsar.TableView.Domain.Categories;
+using PoC.Pulsar.TableView.Domain.Sports;
 using System.Collections.Immutable;
 
 namespace PoC.Pulsar.TableView.Processor;

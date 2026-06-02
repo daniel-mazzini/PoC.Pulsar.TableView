@@ -1,8 +1,13 @@
 using System.Buffers;
-using System.Text;
+using System.Text.Json;
 using DotPulsar;
 using Microsoft.Extensions.Logging;
-using PoC.Pulsar.TableView.Domain.Storages;
+using PoC.Pulsar.TableView.Contracts;
+using PoC.Pulsar.TableView.Domain.Checkpoints;
+using PoC.Pulsar.TableView.Domain.Metadatas;
+using PoC.Pulsar.TableView.Domain.Projector;
+using PoC.Pulsar.TableView.Domain.Sports;
+using PoC.Pulsar.TableView.Domain.TableView;
 using Xunit;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.UnitTests;
@@ -10,274 +15,109 @@ namespace PoC.Pulsar.TableView.Infrastructure.Store.UnitTests;
 public sealed class PulsarTableViewTests
 {
     [Fact]
-    public async Task start_bootstrap_async_should_apply_messages_until_high_watermark_and_stop()
+    public async Task start_bootstrap_async_should_recover_from_state_store_and_collect_delta_changes()
     {
-        var store = new InMemoryStateStore<string, string>();
-        var logger = new ListLogger<PulsarTableView<string>>();
-        var processedMessages = 0;
+        var topic = "persistent://public/default/sports";
+        var storeMetadata = new StoreMetadata(Guid.NewGuid(), SchemaVersion: 1, IsBoostrapCompleted: true, CreatedAt: DateTimeOffset.UtcNow);
+        var messageStorage = new FakeSportMessageStorage();
+        messageStorage.Seed(Sport("sport-1", version: 1));
+        var checkpointStorage = new FakeCheckpointStorage();
+        checkpointStorage.Seed(new TopicCheckpoint(topic, 0, new PulsarMessageId(1, 1, 0, 0), storeMetadata.StoreGenerationId, DateTimeOffset.UtcNow));
+        var rejectedStorage = new FakeRejectedStorage();
+        var unitOfWork = new FakeSportTableViewUnitOfWork(messageStorage, checkpointStorage, rejectedStorage);
+        var unitOfWorkFactory = new FakeUnitOfWorkFactory(unitOfWork);
+        var readerFactory = new FakeProjectorTopicReaderFactory();
+        readerFactory.SeedHighWatermark(topic, 0, new MessageId(1, 2, 0, 0, topic));
+        readerFactory.SeedMessages(topic,
+                                   0,
+                                   CreateMessage(topic, 0, Sport("sport-1", version: 2), new PulsarMessageId(1, 2, 0, 0)));
+        var publisher = new FakeRejectedMessagePublisher();
+        var serializer = new JsonAvroSerializer();
+        var applier = new SportMessageApplier(publisher);
+        var logger = new TestLogger<PulsarTableView<SportMessage>>();
 
-        var view = new PulsarTableView<string>(
-            store,
-            "persistent://public/default/sports",
-            Deserialize,
-            _ => ValueTask.FromResult<IReadOnlyDictionary<int, PulsarMessageId>>(new Dictionary<int, PulsarMessageId>
-            {
-                [0] = new(1, 3, 0)
-            }),
-            cancellationToken => ReadMessagesAsync(cancellationToken),
-            (_, cancellationToken) => EmptyAsync(cancellationToken),
-            logger);
+        var view = new PulsarTableView<SportMessage>(topic,
+                                                      readerFactory,
+                                                      unitOfWorkFactory,
+                                                      serializer,
+                                                      applier,
+                                                      storeMetadata,
+                                                     logger);
 
-        await view.StartBootstrapAsync();
+        var result = await view.StartBootstrapAsync(CancellationToken.None);
 
-        Assert.Equal(3, processedMessages);
-        Assert.Null(view.GetAsync("sport-1"));
-        Assert.Equal("Tennis", view.GetAsync("sport-2"));
-        Assert.Single(await ToListAsync(view.GetAllAsync()));
-        Assert.Equal(new PulsarMessageId(1, 3, 0), store.GetLastCheckpoint());
-        Assert.Contains(logger.Messages, message => message.Contains("Starting bootstrap", StringComparison.Ordinal));
-        Assert.Contains(logger.Messages, message => message.Contains("Bootstrap successfully completed", StringComparison.Ordinal));
-
-        async IAsyncEnumerable<TableViewMessage> ReadMessagesAsync(
-            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
-        {
-            foreach (var message in new[]
-                     {
-                         CreateMessage("sport-1", "Football", new PulsarMessageId(1, 1, 0)),
-                         CreateMessage("sport-2", "Tennis", new PulsarMessageId(1, 2, 0)),
-                         CreateTombstone("sport-1", new PulsarMessageId(1, 3, 0)),
-                         CreateMessage("sport-3", "Basketball", new PulsarMessageId(1, 4, 0))
-                     })
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                processedMessages++;
-                yield return message;
-                await Task.Yield();
-            }
-        }
+        var recovered = Assert.IsType<TopicRecoveredFromStateStore<SportMessage>>(result);
+        var update = Assert.Single(recovered.DeltaChanges);
+        var updated = Assert.IsType<TableEntryUpdated<SportMessage>>(update);
+        Assert.Equal("sport-1", updated.Key);
+        Assert.Equal(2, updated.NewValue.Version);
+        Assert.Equal(2, (await view.GetEntry("sport-1", CancellationToken.None))!.Version);
+        Assert.Equal(2, messageStorage.GetById("sport-1")!.Version);
+        Assert.Equal(0, messageStorage.ClearCallCount);
+        Assert.Single(checkpointStorage.SavedCheckpoints);
+        Assert.Empty(publisher.PublishedMessages);
     }
 
     [Fact]
-    public async Task start_bootstrap_async_should_complete_without_reading_when_topic_has_no_messages()
+    public async Task start_bootstrap_async_should_rebuild_from_earliest_when_metadata_is_untrusted_and_clear_state_store()
     {
-        var store = new InMemoryStateStore<string, string>();
-        var logger = new ListLogger<PulsarTableView<string>>();
-        var readInvoked = false;
+        var topic = "persistent://public/default/sports";
+        var storeMetadata = new StoreMetadata(Guid.NewGuid(), SchemaVersion: 1, IsBoostrapCompleted: false, CreatedAt: DateTimeOffset.UtcNow);
+        var messageStorage = new FakeSportMessageStorage();
+        messageStorage.Seed(Sport("sport-1", version: 1));
+        var checkpointStorage = new FakeCheckpointStorage();
+        var rejectedStorage = new FakeRejectedStorage();
+        var unitOfWork = new FakeSportTableViewUnitOfWork(messageStorage, checkpointStorage, rejectedStorage);
+        var unitOfWorkFactory = new FakeUnitOfWorkFactory(unitOfWork);
+        var readerFactory = new FakeProjectorTopicReaderFactory();
+        readerFactory.SeedHighWatermark(topic, 0, new MessageId(1, 2, 0, 0, topic));
+        readerFactory.SeedMessages(topic,
+                                   0,
+                                   CreateMessage(topic, 0, Sport("sport-2", version: 1), new PulsarMessageId(1, 2, 0, 0)));
+        var publisher = new FakeRejectedMessagePublisher();
+        var serializer = new JsonAvroSerializer();
+        var applier = new SportMessageApplier(publisher);
+        var logger = new TestLogger<PulsarTableView<SportMessage>>();
 
-        var view = new PulsarTableView<string>(
-            store,
-            "persistent://public/default/sports",
-            Deserialize,
-            _ => ValueTask.FromResult<IReadOnlyDictionary<int, PulsarMessageId>>(new Dictionary<int, PulsarMessageId>()),
-            _ =>
-            {
-                readInvoked = true;
-                return EmptyBootstrapAsync();
-            },
-            (_, cancellationToken) => EmptyAsync(cancellationToken),
-            logger);
+        var view = new PulsarTableView<SportMessage>(topic,
+                                                      readerFactory,
+                                                      unitOfWorkFactory,
+                                                      serializer,
+                                                      applier,
+                                                      storeMetadata,
+                                                     logger);
 
-        await view.StartBootstrapAsync();
+        var result = await view.StartBootstrapAsync(CancellationToken.None);
 
-        Assert.False(readInvoked);
-        Assert.Empty(await ToListAsync(view.GetAllAsync()));
-        Assert.Contains(logger.Messages, message => message.Contains("No messages found", StringComparison.Ordinal));
-
-        static async IAsyncEnumerable<TableViewMessage> EmptyBootstrapAsync()
-        {
-            await Task.Yield();
-            yield break;
-        }
+        var rebuilt = Assert.IsType<TopicRebuiltFromEarliest<SportMessage>>(result);
+        Assert.Equal("store_metadata_untrusted", rebuilt.Reason);
+        Assert.Equal(1, messageStorage.ClearCallCount);
+        Assert.Null(messageStorage.GetById("sport-1"));
+        Assert.Equal(1, messageStorage.GetById("sport-2")!.Version);
+        Assert.Equal(0, recoveredDeltaCount(result));
+        Assert.Empty(publisher.PublishedMessages);
+        Assert.Single(checkpointStorage.SavedCheckpoints);
+        Assert.Equal(1, (await view.GetEntry("sport-2", CancellationToken.None))!.Version);
     }
 
-    [Fact]
-    public async Task start_bootstrap_async_should_skip_messages_without_key()
-    {
-        var store = new InMemoryStateStore<string, string>();
-        var logger = new ListLogger<PulsarTableView<string>>();
+    private static int recoveredDeltaCount(TopicBootstrapResult<SportMessage> result)
+        => result is TopicRecoveredFromStateStore<SportMessage> recovered ? recovered.DeltaChanges.Count : 0;
 
-        var view = new PulsarTableView<string>(
-            store,
-            "persistent://public/default/sports",
-            Deserialize,
-            _ => ValueTask.FromResult<IReadOnlyDictionary<int, PulsarMessageId>>(new Dictionary<int, PulsarMessageId>
-            {
-                [0] = new(1, 2, 0)
-            }),
-            cancellationToken => ReadMessagesAsync(cancellationToken),
-            (_, cancellationToken) => EmptyAsync(cancellationToken),
-            logger);
-
-        await view.StartBootstrapAsync();
-
-        Assert.Equal("Tennis", view.GetAsync("sport-2"));
-        Assert.Single(await ToListAsync(view.GetAllAsync()));
-        Assert.Contains(logger.Messages, message => message.Contains("Skipping message without key", StringComparison.Ordinal));
-
-        static async IAsyncEnumerable<TableViewMessage> ReadMessagesAsync(
-            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    private static SportMessage Sport(string id, int version)
+        => new()
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            yield return new TableViewMessage(null, new ReadOnlySequence<byte>(Encoding.UTF8.GetBytes("Football")), new PulsarMessageId(1, 1, 0));
-            await Task.Yield();
-            yield return CreateMessage("sport-2", "Tennis", new PulsarMessageId(1, 2, 0));
-        }
-    }
+            Id = id,
+            Name = $"{id}-name",
+            SportType = "sport",
+            Provider = "provider",
+            EntityCoverage = "covered",
+            Version = version
+        };
 
-    [Fact]
-    public async Task start_bootstrap_async_should_complete_when_message_ledger_exceeds_high_watermark_ledger()
-    {
-        var store = new InMemoryStateStore<string, string>();
-        var logger = new ListLogger<PulsarTableView<string>>();
-
-        var view = new PulsarTableView<string>(
-            store,
-            "persistent://public/default/sports",
-            Deserialize,
-            _ => ValueTask.FromResult<IReadOnlyDictionary<int, PulsarMessageId>>(new Dictionary<int, PulsarMessageId>
-            {
-                [0] = new(1, 99, 0)
-            }),
-            cancellationToken => ReadMessagesAsync(cancellationToken),
-            (_, cancellationToken) => EmptyAsync(cancellationToken),
-            logger);
-
-        await view.StartBootstrapAsync();
-
-        Assert.Equal("Football", view.GetAsync("sport-1"));
-        Assert.Equal(new PulsarMessageId(2, 1, 0), store.GetLastCheckpoint());
-        Assert.Contains(logger.Messages, message => message.Contains("Bootstrap successfully completed", StringComparison.Ordinal));
-
-        static async IAsyncEnumerable<TableViewMessage> ReadMessagesAsync(
-            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            yield return CreateMessage("sport-1", "Football", new PulsarMessageId(2, 1, 0));
-            await Task.Yield();
-        }
-    }
-
-    [Fact]
-    public async Task start_live_tail_async_should_apply_changes_and_emit_events()
-    {
-        var store = new InMemoryStateStore<string, string>();
-        var logger = new ListLogger<PulsarTableView<string>>();
-        var events = new List<Event<string>>();
-        MessageId? capturedStartMessageId = null;
-
-        var view = new PulsarTableView<string>(
-            store,
-            "persistent://public/default/sports",
-            Deserialize,
-            _ => ValueTask.FromResult<IReadOnlyDictionary<int, PulsarMessageId>>(new Dictionary<int, PulsarMessageId>
-            {
-                [0] = new(7, 11, 0)
-            }),
-            cancellationToken => BootstrapMessagesAsync(cancellationToken),
-            (startMessageId, cancellationToken) => LiveMessagesAsync(startMessageId, cancellationToken),
-            logger);
-
-        using var subscription = view.OnUpdate.Subscribe(@event => events.Add(@event));
-
-        await view.StartBootstrapAsync();
-        await view.StartLiveTailAsync(CancellationToken.None);
-
-        Assert.NotNull(capturedStartMessageId);
-        Assert.Equal((ulong)7, capturedStartMessageId!.LedgerId);
-        Assert.Equal((ulong)11, capturedStartMessageId.EntryId);
-        Assert.Equal("Volleyball", view.GetAsync("sport-2"));
-        Assert.Null(view.GetAsync("sport-1"));
-        Assert.Equal(new PulsarMessageId(7, 13, 0), store.GetLastCheckpoint());
-
-        var update = Assert.IsType<UpdateEvent<string>>(events[0]);
-        Assert.Equal("sport-2", update.Key);
-        Assert.Equal("Volleyball", update.NewValue);
-
-        var delete = Assert.IsType<EventDeleted<string>>(events[1]);
-        Assert.Equal("sport-1", delete.Key);
-
-        async IAsyncEnumerable<TableViewMessage> BootstrapMessagesAsync(
-            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            yield return CreateMessage("sport-1", "Football", new PulsarMessageId(7, 11, 0));
-            await Task.Yield();
-        }
-
-        async IAsyncEnumerable<TableViewMessage> LiveMessagesAsync(
-            MessageId startMessageId,
-            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
-        {
-            capturedStartMessageId = startMessageId;
-            cancellationToken.ThrowIfCancellationRequested();
-            yield return CreateMessage("sport-2", "Volleyball", new PulsarMessageId(7, 12, 0));
-            await Task.Yield();
-            yield return CreateTombstone("sport-1", new PulsarMessageId(7, 13, 0));
-        }
-    }
-
-    private static string Deserialize(ReadOnlySequence<byte> data)
-    {
-        return Encoding.UTF8.GetString(data.ToArray());
-    }
-
-    private static TableViewMessage CreateMessage(string key, string value, PulsarMessageId messageId)
-    {
-        return new TableViewMessage(key, new ReadOnlySequence<byte>(Encoding.UTF8.GetBytes(value)), messageId);
-    }
-
-    private static TableViewMessage CreateTombstone(string key, PulsarMessageId messageId)
-    {
-        return new TableViewMessage(key, ReadOnlySequence<byte>.Empty, messageId);
-    }
-
-    private static async IAsyncEnumerable<TableViewMessage> EmptyAsync(
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        await Task.Yield();
-        yield break;
-    }
-
-    private static async Task<List<T>> ToListAsync<T>(IAsyncEnumerable<T> source)
-    {
-        var values = new List<T>();
-
-        await foreach (var value in source)
-        {
-            values.Add(value);
-        }
-
-        return values;
-    }
-
-    private sealed class ListLogger<T> : ILogger<T>
-    {
-        public List<string> Messages { get; } = new();
-
-        public IDisposable BeginScope<TState>(TState state)
-            where TState : notnull
-        {
-            return NullScope.Instance;
-        }
-
-        public bool IsEnabled(LogLevel logLevel)
-        {
-            return true;
-        }
-
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-        {
-            Messages.Add(formatter(state, exception));
-        }
-
-        private sealed class NullScope : IDisposable
-        {
-            public static NullScope Instance { get; } = new();
-
-            public void Dispose()
-            {
-            }
-        }
-    }
+    private static TableViewMessage CreateMessage(string topic, int partitionId, SportMessage message, PulsarMessageId messageId)
+        => new(topic,
+               partitionId,
+               message.Id,
+               new ReadOnlySequence<byte>(JsonSerializer.SerializeToUtf8Bytes(message)),
+               messageId);
 }
