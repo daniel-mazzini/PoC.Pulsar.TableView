@@ -27,6 +27,9 @@ public readonly record struct StorageKey(string Value)
     public static StorageKey TopicCheckpoint(string topicName, int partitionId)
         => $"__geo-projector:topic-checkpoint:{topicName}:{partitionId}";
 
+    public static StorageKey ViewCheckpoint(string viewName)
+        => $"__geo-projector:view-checkpoint:{viewName}";
+
     // public static StorageKey DurableReceipt(string topicName, int partitionId)
     //     => $"__geo-projector:durable-receipt:{topicName}:{partitionId}";
 

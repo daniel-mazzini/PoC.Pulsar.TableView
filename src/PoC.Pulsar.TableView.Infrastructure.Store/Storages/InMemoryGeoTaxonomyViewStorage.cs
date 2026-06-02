@@ -35,37 +35,22 @@ public sealed class InMemoryGeoTaxonomyViewStorage : IGeoTaxonomyViewStorage
         }
     }
 
-    public GeoTaxonomyViewMessage? GetAndUpdate(string sportId, Func<GeoTaxonomyViewMessage, GeoTaxonomyViewMessage> update)
+    public ValueTask ClearAsync(CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         lock (_gate)
         {
-            if (!_views.TryGetValue(sportId, out var view))
-            {
-                return null;
-            }
-
-            var updated = update(view);
-            _views[sportId] = updated;
-            return updated;
+            _views.Clear();
         }
+
+        return ValueTask.CompletedTask;
     }
 
-    public GeoTaxonomyViewMessage TryUpdate(string sportId,
-                                            Func<string, GeoTaxonomyViewMessage> addFactory,
-                                            Func<string, GeoTaxonomyViewMessage, GeoTaxonomyViewMessage> updateFactory)
+    public GeoTaxonomyViewMessage? TryGetView(SportId id)
     {
         lock (_gate)
         {
-            if (_views.TryGetValue(sportId, out var currentView))
-            {
-                var updated = updateFactory(sportId, currentView);
-                _views[sportId] = updated;
-                return updated;
-            }
-
-            var created = addFactory(sportId);
-            _views[sportId] = created;
-            return created;
+            return _views.GetValueOrDefault(id.Value);
         }
     }
 

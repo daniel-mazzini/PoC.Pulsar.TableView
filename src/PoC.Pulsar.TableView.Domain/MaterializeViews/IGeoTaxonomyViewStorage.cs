@@ -8,10 +8,8 @@ public interface IGeoTaxonomyViewStorage
 {
     void AddTaxonomyView(SportId id, GeoTaxonomyViewMessage view);
     GeoTaxonomyViewMessage? AddCategoryAsync(string sportId, GeoTaxonomyNode node, CancellationToken cancellationToken);
-    GeoTaxonomyViewMessage? GetAndUpdate(string sportId, Func<GeoTaxonomyViewMessage, GeoTaxonomyViewMessage> update);
-    GeoTaxonomyViewMessage TryUpdate(string sportId,
-                                     Func<string, GeoTaxonomyViewMessage> addFactory,
-                                     Func<string, GeoTaxonomyViewMessage, GeoTaxonomyViewMessage> updateFactory);
+    ValueTask ClearAsync(CancellationToken cancellationToken);
+    GeoTaxonomyViewMessage? TryGetView(SportId id);
     ValueTask<GeoTaxonomyViewMessage?> RemoveCategoryAsync(SportId sportId, CategoryId categoryId, CancellationToken cancellationToken);
     GeoTaxonomyViewMessage? RemoveView(SportId id);
 }

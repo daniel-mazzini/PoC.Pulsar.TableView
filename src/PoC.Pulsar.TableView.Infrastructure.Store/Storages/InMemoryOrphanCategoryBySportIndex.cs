@@ -21,6 +21,18 @@ public sealed class InMemoryOrphanCategoryBySportIndex : IOrphanCategoryBySportI
         return ValueTask.CompletedTask;
     }
 
+    public ValueTask ClearAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            _bySport.Clear();
+            _byParent.Clear();
+        }
+
+        return ValueTask.CompletedTask;
+    }
+
     public ValueTask ClearOrphanCategoryWithSportIdAsync(SportId sportId, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();

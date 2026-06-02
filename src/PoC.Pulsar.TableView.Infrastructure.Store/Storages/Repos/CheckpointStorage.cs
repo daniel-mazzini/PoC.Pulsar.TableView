@@ -22,6 +22,7 @@ public class CheckpointStorage : TsavoriteRepositoryBase, ICheckpointStorage
 
     public async Task SaveCheckpointAsync(string topicName, int partitionId, PulsarMessageId lastProcessedMessageId, CancellationToken cancellationToken)
     {
+        ThrowIfDisposed();
         var metadata = await _metadataStorage.EnsureMetadataAsync(cancellationToken);
         var existing = await GetLastCheckpoint(topicName, partitionId, cancellationToken);
 
@@ -39,10 +40,37 @@ public class CheckpointStorage : TsavoriteRepositoryBase, ICheckpointStorage
 
     public async ValueTask<TopicCheckpoint?> GetLastCheckpoint(string topicName, int partitionId, CancellationToken cancellationToken)
     {
+        ThrowIfDisposed();
         var session = _sessionProvider.GetLightSession();
         return await ReadFromSessionAsync<TopicCheckpoint,SpanByte,SpanByteAndMemory,SpanByteFunctions<Empty>>(session,
-                                                                                                               StorageKey.TopicCheckpoint(topicName, partitionId),
-                                                                                                               cancellationToken);
+                                                                                                                StorageKey.TopicCheckpoint(topicName, partitionId),
+                                                                                                                cancellationToken);
+    }
+
+    public async Task SaveViewCheckpointAsync(string viewName, CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        var metadata = await _metadataStorage.EnsureMetadataAsync(cancellationToken);
+        var checkpoint = new ViewCheckpoint(viewName,
+                                            metadata.StoreGenerationId.ToString("D"),
+                                            BuildCompleted: true,
+                                            DateTimeOffset.UtcNow);
+
+        var session = _sessionProvider.GetLightSession();
+        await UpsertIntoSessionAsync(session,
+                                     StorageKey.ViewCheckpoint(viewName),
+                                     default,
+                                     checkpoint,
+                                     cancellationToken);
+    }
+
+    public async ValueTask<ViewCheckpoint?> GetViewCheckpointAsync(string viewName, CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        var session = _sessionProvider.GetLightSession();
+        return await ReadFromSessionAsync<ViewCheckpoint, SpanByte, SpanByteAndMemory, SpanByteFunctions<Empty>>(session,
+                                                                                                                  StorageKey.ViewCheckpoint(viewName),
+                                                                                                                  cancellationToken);
     }
 
     private void ThrowIfDisposed()

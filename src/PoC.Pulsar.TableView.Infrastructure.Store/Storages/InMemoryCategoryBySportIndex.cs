@@ -22,6 +22,18 @@ public sealed class InMemoryCategoryBySportIndex : ICategoryBySportIndex
         return ValueTask.CompletedTask;
     }
 
+    public ValueTask ClearAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            _bySport.Clear();
+            _byParent.Clear();
+        }
+
+        return ValueTask.CompletedTask;
+    }
+
     public ValueTask<IReadOnlySet<CategoryId>> GetCategoriesBySport(SportId sportId, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();

@@ -5,6 +5,7 @@ namespace PoC.Pulsar.TableView.Domain.Categories;
 public interface ICategoryBySportIndex
 {
     ValueTask AddCategorybySportAsync(SportId sportId, CategoryId categoryId, CancellationToken cancellationToken);
+    ValueTask ClearAsync(CancellationToken cancellationToken);
     ValueTask<IReadOnlySet<CategoryId>> GetCategoriesBySport(SportId sportId, CancellationToken cancellationToken);
     ValueTask RemoveCategorybySportAsync(SportId sportId, CategoryId categoryId, CancellationToken cancellationToken);
     ValueTask ClearCategoryWithSportIdAsync(SportId sportId, CancellationToken cancellationToken);

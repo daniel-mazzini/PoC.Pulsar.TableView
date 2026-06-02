@@ -100,6 +100,8 @@ var processor = new GeoTaxonomyProcessor(
     categoryBySportIndex,
     orphanCategoryBySportIndex,
     taxonomyViewStorage,
+    unitOfWorkFactory,
+    metadata,
     loggerFactory.CreateLogger<GeoTaxonomyProcessor>());
 
 await processor.RunAsync(cts.Token);

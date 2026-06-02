@@ -1,12 +1,14 @@
 using Microsoft.Extensions.Logging;
+using PoC.Pulsar.TableView.Domain.Checkpoints;
 using PoC.Pulsar.TableView.Contracts;
 using PoC.Pulsar.TableView.Domain.Categories;
 using PoC.Pulsar.TableView.Domain.Filter;
 using PoC.Pulsar.TableView.Domain.MaterializeViews;
+using PoC.Pulsar.TableView.Domain.Metadatas;
 using PoC.Pulsar.TableView.Domain.Projector;
 using PoC.Pulsar.TableView.Domain.Sports;
+using PoC.Pulsar.TableView.Domain.Storages.StateStore;
 using PoC.Pulsar.TableView.Domain.TableView;
-using System.Collections.Concurrent;
 using System.Linq;
 using System.Reactive.Linq;
 using System.Text.Json;
@@ -15,52 +17,61 @@ namespace PoC.Pulsar.TableView.Processor;
 
 internal sealed class GeoTaxonomyProcessor
 {
+    private const string ViewName = "category-taxonomy";
+
     private readonly ICategoryBySportIndex _relationIndex;
     private readonly IPulsarTableView<RawCategoryMessage> _categoriesTableView;
     private readonly ILogger<GeoTaxonomyProcessor> _logger;
+    private readonly StoreMetadata _storeMetadata;
     private readonly IOrphanCategoryBySportIndex _pendingIndex;
     private readonly IPulsarTableView<SportMessage> _sportsTableView;
     private readonly ITaxonomyViewPublisher _taxonomyPublisher;
     private readonly IGeoTaxonomyViewStorage _materializeViewStorage;
-    private readonly ConcurrentDictionary<SportId, GeoTaxonomyViewMessage> _lastView;
+    private readonly IUnitOfWorkFactory _unitOfWorkFactory;
+
     public GeoTaxonomyProcessor(IPulsarTableView<SportMessage> sportsTableView,
                                 IPulsarTableView<RawCategoryMessage> categoriesTableView,
                                 ITaxonomyViewPublisher taxonomyPublisher,
                                 ICategoryBySportIndex relationIndex,
                                 IOrphanCategoryBySportIndex pendingIndex,
                                 IGeoTaxonomyViewStorage materializeViewStorage,
+                                IUnitOfWorkFactory unitOfWorkFactory,
+                                StoreMetadata storeMetadata,
                                 ILogger<GeoTaxonomyProcessor> logger)
-        => (_sportsTableView, _categoriesTableView, _taxonomyPublisher, _relationIndex, _pendingIndex, _materializeViewStorage, _logger)
-            = (sportsTableView, categoriesTableView, taxonomyPublisher, relationIndex, pendingIndex, materializeViewStorage, logger);
+        => (_sportsTableView, _categoriesTableView, _taxonomyPublisher, _relationIndex, _pendingIndex, _materializeViewStorage, _unitOfWorkFactory, _storeMetadata, _logger)
+            = (sportsTableView, categoriesTableView, taxonomyPublisher, relationIndex, pendingIndex, materializeViewStorage, unitOfWorkFactory, storeMetadata, logger);
 
 
     public async Task RunAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("Bootstrapping sports and categories table views.");
-        // the bootstrap methods does not listing any events. We load all the topic compacted messages up to the latest without processing any update until both views are bootstrapped,
-        // then we load the category index and build the initial snapshot from the source of truth (the table views) to ensure we don't have
-        var sportsBootstrap = await _sportsTableView.StartBootstrapAsync(cancellationToken);
-        var categoriesBootstrap = await _categoriesTableView.StartBootstrapAsync(cancellationToken);
+        var sportsBootstrapTask = _sportsTableView.StartBootstrapAsync(cancellationToken);
+        var categoriesBootstrapTask = _categoriesTableView.StartBootstrapAsync(cancellationToken);
+        var viewCheckpointTask = GetViewCheckpointAsync(cancellationToken);
 
-        bool requiresRebuild = sportsBootstrap is TopicRebuiltFromEarliest<SportMessage> || categoriesBootstrap is TopicRebuiltFromEarliest<RawCategoryMessage>;
-        var countryFilter = new GeoCategoryMessageFilter();
+        await Task.WhenAll(sportsBootstrapTask, categoriesBootstrapTask, viewCheckpointTask);
+
+        var sportsBootstrap = sportsBootstrapTask.Result;
+        var categoriesBootstrap = categoriesBootstrapTask.Result;
+        ViewCheckpoint? viewCheckpoint = viewCheckpointTask.Result;
+
+
+        bool requiresRebuild = RequiresRebuild(viewCheckpoint, sportsBootstrap, categoriesBootstrap);
         if (requiresRebuild)
         {
-            var sports = _sportsTableView.GetSnapshot();
-            var categories = _categoriesTableView.GetSnapshot(countryFilter);
+            await ClearProjectorStateAsync(cancellationToken);
 
-            // await BuildAsync(sports,categories,cancellationToken);
+            var sports = _sportsTableView.GetSnapshot();
+            var categories = _categoriesTableView.GetSnapshot(new GeoCategoryMessageFilter());
+
+            await BuildAsync(sports, categories, cancellationToken);
+            await SaveViewCheckpointAsync(cancellationToken);
         }
         else
         {
-            var sportsDelta = ((TopicRecoveredFromStateStore<SportMessage>)sportsBootstrap).DeltaChanges;
-
-            var categoriesDelta = ((TopicRecoveredFromStateStore<RawCategoryMessage>)categoriesBootstrap).DeltaChanges;
-
-            // await ApplyDeltaAsync(sportsDelta, categoriesDelta,cancellationToken);
+            await ApplyBootstrapDeltasAsync(sportsBootstrap, categoriesBootstrap, cancellationToken);
+            await SaveViewCheckpointAsync(cancellationToken);
         }
-
-        await BuildSnapshotAsync(cancellationToken);
 
         using var sportsSubscription = _sportsTableView.OnChanges
                                                         .Select(@event => Observable.FromAsync(ct => OnSportChangeAsync(@event, ct)))
@@ -88,42 +99,102 @@ internal sealed class GeoTaxonomyProcessor
         }
     }
 
-
-
-    private static string ToJson<T>(T value) => JsonSerializer.Serialize(value, new JsonSerializerOptions { WriteIndented = true });
-
-    private async ValueTask BuildSnapshotAsync(CancellationToken cancellationToken)
+    private async Task BuildAsync(IDictionary<string, SportMessage> sports, IDictionary<string, RawCategoryMessage> categories, CancellationToken cancellationToken)
     {
-        // 1. Read all the sports
-        var sports = _sportsTableView.GetSnapshot();
-
-        // 2. Read all the categories where Country Code is not null to build the category-sport index and detect pending categories without sport
-        IDictionary<string, RawCategoryMessage> countryCategories = _categoriesTableView.GetSnapshot(new GeoCategoryMessageFilter());
-        foreach (var category in countryCategories.Values)
+        foreach (var category in categories.Values)
         {
             var sportId = new SportId(category.SportId);
             var categoryId = new CategoryId(category.Id);
             await _relationIndex.AddCategorybySportAsync(sportId, categoryId, cancellationToken);
             if (!sports.ContainsKey(category.SportId))
+            {
                 await _pendingIndex.AddOrphanCategorybySportAsync(sportId, categoryId, cancellationToken);
+            }
         }
 
-        List<GeoTaxonomyViewMessage> createViewList = new (capacity: sports.Values.Count);
+        List<GeoTaxonomyViewMessage> createdViews = new(capacity: sports.Values.Count);
         foreach (var sport in sports.Values)
         {
             var sportId = new SportId(sport.Id);
-            var categoriesIds = await _relationIndex.GetCategoriesBySport(sportId, cancellationToken);
-            var sportCategories = await FilterCategoriesForGeoViewAsync(categoriesIds, countryCategories, cancellationToken);
+            var categoryIds = await _relationIndex.GetCategoriesBySport(sportId, cancellationToken);
+            var sportCategories = await FilterCategoriesForGeoViewAsync(categoryIds, categories, cancellationToken);
             var view = GeoTaxonomyViewMessage.Create(sport, sportCategories);
-            createViewList.Add(view);
+            createdViews.Add(view);
             _materializeViewStorage.AddTaxonomyView(sportId, view);
         }
 
-        await _taxonomyPublisher.PublishListMessage(createViewList, cancellationToken);
+        await _taxonomyPublisher.PublishListMessage(createdViews, cancellationToken);
     }
 
+    private static string ToJson<T>(T value) => JsonSerializer.Serialize(value, new JsonSerializerOptions { WriteIndented = true });
+
+    private async Task ApplyBootstrapDeltasAsync(TopicBootstrapResult<SportMessage> sportsBootstrap,
+                                                 TopicBootstrapResult<RawCategoryMessage> categoriesBootstrap,
+                                                 CancellationToken cancellationToken)
+    {
+        foreach (var sportChange in GetDeltaChanges(sportsBootstrap))
+        {
+            await OnSportChangeAsync(sportChange, cancellationToken);
+        }
+
+        foreach (var categoryChange in GetDeltaChanges(categoriesBootstrap))
+        {
+            await OnCategoryChangeAsync(categoryChange, cancellationToken);
+        }
+    }
+
+    private async Task ClearProjectorStateAsync(CancellationToken cancellationToken)
+    {
+        await _materializeViewStorage.ClearAsync(cancellationToken);
+        await _relationIndex.ClearAsync(cancellationToken);
+        await _pendingIndex.ClearAsync(cancellationToken);
+    }
+
+    private async Task SaveViewCheckpointAsync(CancellationToken cancellationToken)
+    {
+        using var unitOfWork = _unitOfWorkFactory.CreateBootstrap<SportMessage>();
+        await unitOfWork.CheckpointStorage.SaveViewCheckpointAsync(ViewName, cancellationToken);
+    }
+
+    private async Task<ViewCheckpoint?> GetViewCheckpointAsync(CancellationToken cancellationToken)
+    {
+        using var unitOfWork = _unitOfWorkFactory.CreateBootstrap<SportMessage>();
+        return await unitOfWork.CheckpointStorage.GetViewCheckpointAsync(ViewName, cancellationToken);
+    }
+
+    private bool RequiresRebuild(ViewCheckpoint? viewCheckpoint,
+                                 TopicBootstrapResult<SportMessage> sportsBootstrap,
+                                 TopicBootstrapResult<RawCategoryMessage> categoriesBootstrap)
+    {
+        if (viewCheckpoint is null)
+        {
+            return true;
+        }
+
+        if (!viewCheckpoint.BuildCompleted)
+        {
+            return true;
+        }
+
+        if (viewCheckpoint.StoreId != _storeMetadata.StoreGenerationId.ToString("D"))
+        {
+            return true;
+        }
+
+        return sportsBootstrap is TopicRebuiltFromEarliest<SportMessage>
+               || categoriesBootstrap is TopicRebuiltFromEarliest<RawCategoryMessage>;
+    }
+
+    private static IReadOnlyCollection<TableEntryChange<TMessage>> GetDeltaChanges<TMessage>(TopicBootstrapResult<TMessage> bootstrapResult)
+        => bootstrapResult switch
+        {
+            TopicRecoveredFromStateStore<TMessage> recovered => recovered.DeltaChanges,
+            TopicHighWatermarkNotFound<TMessage> => [],
+            _ => throw new InvalidOperationException($"Bootstrap result {bootstrapResult.GetType().Name} does not expose delta changes.")
+        };
+
     
-    private async Task<List<GeoTaxonomyNode>> FilterCategoriesForGeoViewAsync(IReadOnlySet<CategoryId> categoriesIds, IDictionary<string,RawCategoryMessage> countryCategories, CancellationToken cancellationToken)
+    private async Task<List<GeoTaxonomyNode>> FilterCategoriesForGeoViewAsync(IReadOnlySet<CategoryId> categoriesIds, IDictionary<string, RawCategoryMessage> countryCategories, CancellationToken cancellationToken)
     {
         List<GeoTaxonomyNode> nodes = new(categoriesIds.Count);
         foreach (var categoryId in categoriesIds)
@@ -135,22 +206,23 @@ internal sealed class GeoTaxonomyProcessor
             else
             {
                 var rawCategoryMessage = await _categoriesTableView.GetEntry(categoryId.Value, cancellationToken);
-                if(rawCategoryMessage?.CountryCode != null)
+                if (rawCategoryMessage?.CountryCode != null)
                 {
                     nodes.Add(new GeoTaxonomyNode(rawCategoryMessage.Id, rawCategoryMessage.CountryCode!));
                 }
             }
-
         }
+
         return [.. nodes.DistinctBy(cat => cat.CountryCode).OrderBy(cat => cat.CountryCode)];
     }
+
     private async Task<List<GeoTaxonomyNode>> FilterCategoriesForGeoViewAsync(IReadOnlySet<CategoryId> categoriesIds, CancellationToken cancellationToken)
     {
         List<GeoTaxonomyNode> nodes = new(categoriesIds.Count);
         foreach (var categoryId in categoriesIds)
         {
             var rawCategoryMessage = await _categoriesTableView.GetEntry(categoryId.Value, cancellationToken);
-            if(rawCategoryMessage?.CountryCode != null)
+            if (rawCategoryMessage?.CountryCode != null)
             {
                 nodes.Add(new GeoTaxonomyNode(rawCategoryMessage.Id, rawCategoryMessage.CountryCode!));
             }
@@ -263,16 +335,14 @@ internal sealed class GeoTaxonomyProcessor
             return;
         }
 
-        var viewUpdated = _materializeViewStorage.GetAndUpdate(sport.Id,
-                                             (currentView) =>
-                                             {
-                                                return currentView.AddOrUpdateCategory(new GeoTaxonomyNode(rawCategoryMessage.Id, rawCategoryMessage.CountryCode!));
-                                             });
+        var currentView = _materializeViewStorage.TryGetView(new SportId(sport.Id));
+        var viewUpdated = currentView is null
+            ? await GetViewFromSport(sport, cancellationToken)
+            : currentView.AddOrUpdateCategory(new GeoTaxonomyNode(rawCategoryMessage.Id, rawCategoryMessage.CountryCode!));
 
-        if (viewUpdated is not null)
-        {
-            await _taxonomyPublisher.PublishAsync(viewUpdated!, cancellationToken);
-        }
+        _materializeViewStorage.AddTaxonomyView(new SportId(sport.Id), viewUpdated);
+
+        await _taxonomyPublisher.PublishAsync(viewUpdated, cancellationToken);
     }
 
 
@@ -295,9 +365,12 @@ internal sealed class GeoTaxonomyProcessor
             return;
         }
 
-        var viewUpdated = _materializeViewStorage.TryUpdate(sport.Id
-            , (sportId) => GetViewFromSport(sport, cancellationToken).Result
-            , (sportId, currentView) => GeoTaxonomyViewMessage.Create(sport, currentView.GeoCategories));
+        var currentView = _materializeViewStorage.TryGetView(new SportId(sport.Id));
+        var viewUpdated = currentView is null
+            ? await GetViewFromSport(sport, cancellationToken)
+            : GeoTaxonomyViewMessage.Create(sport, currentView.GeoCategories);
+
+        _materializeViewStorage.AddTaxonomyView(new SportId(sport.Id), viewUpdated);
 
         await _taxonomyPublisher.PublishAsync(viewUpdated, cancellationToken);
     }

@@ -204,9 +204,15 @@ internal sealed class FakeCheckpointStorage : ICheckpointStorage
     public TopicCheckpoint? LastSaved { get; private set; }
     public List<TopicCheckpoint> SavedCheckpoints { get; } = [];
     public Dictionary<(string TopicName, int PartitionId), TopicCheckpoint> Checkpoints { get; } = new();
+    public ViewCheckpoint? LastSavedViewCheckpoint { get; private set; }
+    public Dictionary<string, ViewCheckpoint> ViewCheckpoints { get; } = new(StringComparer.Ordinal);
+    public string CurrentStoreId { get; set; } = Guid.NewGuid().ToString("D");
 
     public void Seed(TopicCheckpoint checkpoint)
         => Checkpoints[(checkpoint.TopicName, checkpoint.PartitionId)] = checkpoint;
+
+    public void Seed(ViewCheckpoint checkpoint)
+        => ViewCheckpoints[checkpoint.ViewName] = checkpoint;
 
     public Task SaveCheckpointAsync(string topicName, int partitionId, PulsarMessageId lastProcessedMessageId, CancellationToken cancellationToken)
     {
@@ -219,6 +225,17 @@ internal sealed class FakeCheckpointStorage : ICheckpointStorage
 
     public ValueTask<TopicCheckpoint?> GetLastCheckpoint(string topicName, int partitionId, CancellationToken cancellationToken)
         => ValueTask.FromResult(Checkpoints.TryGetValue((topicName, partitionId), out var checkpoint) ? checkpoint : null);
+
+    public Task SaveViewCheckpointAsync(string viewName, CancellationToken cancellationToken)
+    {
+        var checkpoint = new ViewCheckpoint(viewName, CurrentStoreId, BuildCompleted: true, DateTimeOffset.UtcNow);
+        LastSavedViewCheckpoint = checkpoint;
+        ViewCheckpoints[viewName] = checkpoint;
+        return Task.CompletedTask;
+    }
+
+    public ValueTask<ViewCheckpoint?> GetViewCheckpointAsync(string viewName, CancellationToken cancellationToken)
+        => ValueTask.FromResult(ViewCheckpoints.TryGetValue(viewName, out var checkpoint) ? checkpoint : null);
 }
 
 internal sealed class FakeSportTableViewUnitOfWork : ITableViewUnitOfWork<SportMessage>
