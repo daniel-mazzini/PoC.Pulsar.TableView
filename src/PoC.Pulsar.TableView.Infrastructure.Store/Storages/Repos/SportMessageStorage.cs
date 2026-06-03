@@ -29,7 +29,7 @@ public sealed class SportMessageStorage : TsavoriteRepositoryBase, ISportMessage
                                                                                                                cancellationToken);
     }
 
-    private static readonly byte[] SportMessagePrefixBytes = Encoding.UTF8.GetBytes(StorageKey.SportMessagePrefix.Value);
+    private static readonly byte[] SportMessagePrefixBytes = Encoding.UTF8.GetBytes(StorageKey.SportMessagePrefix);
 
     public Dictionary<string, SportMessage> GetAll(IValuePredicate<SportMessage>? valuePredicate = null)
     {
@@ -77,7 +77,7 @@ public sealed class SportMessageStorage : TsavoriteRepositoryBase, ISportMessage
 
         foreach (var key in keys)
         {
-            await DeleteAsync(key[StorageKey.SportMessagePrefix.Value.Length..], cancellationToken);
+            await DeleteAsync(key[StorageKey.SportMessagePrefix.Length..], cancellationToken);
         }
     }
 

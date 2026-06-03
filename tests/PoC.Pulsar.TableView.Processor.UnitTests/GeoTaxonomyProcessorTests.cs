@@ -24,9 +24,12 @@ public sealed class GeoTaxonomyProcessorTests
     {
         var metadata = new StoreMetadata(Guid.NewGuid(), SchemaVersion: 1, IsBoostrapCompleted: true, CreatedAt: DateTimeOffset.UtcNow);
         var dependencies = CreateDependencies(metadata);
-        dependencies.ViewStorage.AddTaxonomyView(new SportId("stale-sport"), GeoTaxonomyViewMessage.Create(Sport("stale-sport", "Stale", "STALE"), []));
-        await dependencies.RelationIndex.AddCategorybySportAsync(new SportId("stale-sport"), new CategoryId("stale-category"), CancellationToken.None);
-        await dependencies.PendingIndex.AddOrphanCategorybySportAsync(new SportId("stale-sport"), new CategoryId("stale-category"), CancellationToken.None);
+        dependencies.ViewStorage.SeedPublishedView(new SportId("stale-sport"), GeoTaxonomyViewMessage.Create(Sport("stale-sport", "Stale", "STALE"), []));
+        await dependencies.RelationIndex.IndexCategoryAsync(new CategoryRelations(new CategoryId("stale-category"), new SportId("stale-sport"), null), CancellationToken.None);
+        await dependencies.PendingIndex.TryMarkCategoryWaitingForSportAsync(new SportId("stale-sport"),
+                                                                            new CategoryId("stale-category"),
+                                                                            static (_, _) => ValueTask.FromResult(false),
+                                                                            CancellationToken.None);
 
         var sports = new FakePulsarTableView<SportMessage>(
             [Sport("sport-1", "Soccer", "SOCCER")],
@@ -46,7 +49,7 @@ public sealed class GeoTaxonomyProcessorTests
         var savedCheckpoint = dependencies.CheckpointStorage.LastSavedViewCheckpoint!;
         Assert.Equal("category-taxonomy", savedCheckpoint.ViewName);
         Assert.Equal(metadata.StoreGenerationId.ToString("D"), savedCheckpoint.StoreId);
-        Assert.Single(publisher.PublishedLists);
+        Assert.Single(publisher.PublishedTaxonomies);
     }
 
     [Fact]
@@ -55,7 +58,7 @@ public sealed class GeoTaxonomyProcessorTests
         var metadata = new StoreMetadata(Guid.NewGuid(), SchemaVersion: 1, IsBoostrapCompleted: true, CreatedAt: DateTimeOffset.UtcNow);
         var dependencies = CreateDependencies(metadata);
         dependencies.CheckpointStorage.Seed(new ViewCheckpoint("category-taxonomy", metadata.StoreGenerationId.ToString("D"), BuildCompleted: true, DateTimeOffset.UtcNow));
-        dependencies.ViewStorage.AddTaxonomyView(new SportId("sport-1"), GeoTaxonomyViewMessage.Create(Sport("sport-1", "Soccer", "SOCCER"), []));
+        dependencies.ViewStorage.SeedPublishedView(new SportId("sport-1"), GeoTaxonomyViewMessage.Create(Sport("sport-1", "Soccer", "SOCCER"), []));
 
         var sports = new FakePulsarTableView<SportMessage>(
             [Sport("sport-1", "Soccer Updated", "SOCCER")],
@@ -95,7 +98,48 @@ public sealed class GeoTaxonomyProcessorTests
 
         Assert.Equal(1, dependencies.ViewStorage.ClearCallCount);
         Assert.Equal(metadata.StoreGenerationId.ToString("D"), dependencies.CheckpointStorage.LastSavedViewCheckpoint!.StoreId);
-        Assert.Single(publisher.PublishedLists);
+        Assert.Single(publisher.PublishedTaxonomies);
+    }
+
+    [Fact]
+    public async Task run_async_should_publish_versioned_result_view_and_mark_published_after_publish_during_rebuild()
+    {
+        var metadata = new StoreMetadata(Guid.NewGuid(), SchemaVersion: 1, IsBoostrapCompleted: true, CreatedAt: DateTimeOffset.UtcNow);
+        var dependencies = CreateDependencies(metadata);
+        var sports = new FakePulsarTableView<SportMessage>([Sport("sport-1", "Soccer", "SOCCER")], new TopicRecoveredFromStateStore<SportMessage>([]));
+        var categories = new FakePulsarTableView<RawCategoryMessage>([Category("category-es", "sport-1", "ES")], new TopicRecoveredFromStateStore<RawCategoryMessage>([]));
+        var publisher = new FakeTaxonomyViewPublisher();
+        var processor = CreateProcessor(sports, categories, publisher, dependencies);
+
+        await using var runner = await ProcessorRunner.StartAsync(processor, sports, categories);
+
+        var published = Assert.Single(publisher.PublishedTaxonomies);
+        Assert.Equal(1, published.Version);
+        Assert.Contains(dependencies.ViewStorage.OperationLog, entry => entry == "publish:sport-1:1");
+        Assert.Contains(dependencies.ViewStorage.OperationLog, entry => entry == "mark-published:sport-1:1");
+        Assert.True(dependencies.ViewStorage.OperationLog.IndexOf("publish:sport-1:1") < dependencies.ViewStorage.OperationLog.IndexOf("mark-published:sport-1:1"));
+    }
+
+    [Fact]
+    public async Task run_async_should_generate_single_build_generation_id_per_rebuild()
+    {
+        var metadata = new StoreMetadata(Guid.NewGuid(), SchemaVersion: 1, IsBoostrapCompleted: true, CreatedAt: DateTimeOffset.UtcNow);
+        var dependencies = CreateDependencies(metadata);
+        var sports = new FakePulsarTableView<SportMessage>(
+        [
+            Sport("sport-1", "Soccer", "SOCCER"),
+            Sport("sport-2", "Basketball", "GENERIC")
+        ],
+        new TopicRecoveredFromStateStore<SportMessage>([]));
+        var categories = new FakePulsarTableView<RawCategoryMessage>([], new TopicRecoveredFromStateStore<RawCategoryMessage>([]));
+        var publisher = new FakeTaxonomyViewPublisher();
+        var processor = CreateProcessor(sports, categories, publisher, dependencies);
+
+        await using var runner = await ProcessorRunner.StartAsync(processor, sports, categories);
+
+        Assert.Equal(2, dependencies.ViewStorage.UpsertCalls.Count);
+        Assert.Single(dependencies.ViewStorage.UpsertCalls.Select(call => call.BuildGenerationId).Distinct());
+        Assert.All(dependencies.ViewStorage.UpsertCalls, call => Assert.Matches("^build-[0-9a-f]{32}$", call.BuildGenerationId));
     }
 
     [Fact]
@@ -131,12 +175,13 @@ public sealed class GeoTaxonomyProcessorTests
 
         await using var runner = await ProcessorRunner.StartAsync(processor, sports, categories);
         sports.EmitUpdate("sport-1", Sport("sport-1", "Soccer Updated", "SOCCER"), Sport("sport-1", "Soccer", "SOCCER"));
-        var taxonomy = await publisher.WaitForPublishedCountAsync(1);
+        var taxonomy = await publisher.WaitForPublishedCountAsync(2);
+        var updated = taxonomy[^1];
 
-        Assert.Equal("sport-1", taxonomy[0].SportId);
-        Assert.Equal("Soccer Updated", taxonomy[0].SportName);
-        Assert.Equal("SOCCER", taxonomy[0].SportType);
-        Assert.Equal(["ES"], taxonomy[0].GeoCategories.Select(category => category.CountryCode));
+        Assert.Equal("sport-1", updated.SportId);
+        Assert.Equal("Soccer Updated", updated.SportName);
+        Assert.Equal("SOCCER", updated.SportType);
+        Assert.Equal(["ES"], updated.GeoCategories.Select(category => category.CountryCode));
     }
 
     [Fact]
@@ -188,10 +233,11 @@ public sealed class GeoTaxonomyProcessorTests
         categories.Upsert(oldCategory.Id, oldCategory);
         var category = Category("category-es", "sport-1", "ES");
         categories.EmitUpdate(category.Id, category, oldCategory);
-        var taxonomy = await publisher.WaitForPublishedCountAsync(1);
+        var taxonomy = await publisher.WaitForPublishedCountAsync(2);
+        var updated = taxonomy[^1];
 
-        Assert.Equal("sport-1", taxonomy[0].SportId);
-        Assert.Equal(["ES"], taxonomy[0].GeoCategories.Select(categoryNode => categoryNode.CountryCode));
+        Assert.Equal("sport-1", updated.SportId);
+        Assert.Equal(["ES"], updated.GeoCategories.Select(categoryNode => categoryNode.CountryCode));
     }
 
     [Fact]
@@ -211,11 +257,12 @@ public sealed class GeoTaxonomyProcessorTests
         var movedCategory = Category("category-es", "sport-2", "ES");
         categories.Upsert(movedCategory.Id, movedCategory);
         categories.EmitUpdate(movedCategory.Id, movedCategory, existingCategory);
-        var taxonomies = await publisher.WaitForPublishedCountAsync(2);
+        var taxonomies = await publisher.WaitForPublishedCountAsync(4);
+        var movedTaxonomies = taxonomies.Skip(taxonomies.Count - 2).ToArray();
 
-        Assert.Equal(["sport-1", "sport-2"], taxonomies.Select(taxonomy => taxonomy.SportId));
-        Assert.Empty(taxonomies[0].GeoCategories);
-        Assert.Equal(["ES"], taxonomies[1].GeoCategories.Select(category => category.CountryCode));
+        Assert.Equal(["sport-1", "sport-2"], movedTaxonomies.Select(taxonomy => taxonomy.SportId));
+        Assert.Empty(movedTaxonomies[0].GeoCategories);
+        Assert.Equal(["ES"], movedTaxonomies[1].GeoCategories.Select(category => category.CountryCode));
     }
 
     [Fact]
@@ -230,10 +277,11 @@ public sealed class GeoTaxonomyProcessorTests
         await using var runner = await ProcessorRunner.StartAsync(processor, sports, categories);
         categories.Delete(existingCategory.Id);
         categories.EmitDelete(existingCategory.Id, existingCategory);
-        var taxonomies = await publisher.WaitForPublishedCountAsync(1);
+        var taxonomies = await publisher.WaitForPublishedCountAsync(2);
+        var updated = taxonomies[^1];
 
-        Assert.Equal("sport-1", taxonomies[0].SportId);
-        Assert.Empty(taxonomies[0].GeoCategories);
+        Assert.Equal("sport-1", updated.SportId);
+        Assert.Empty(updated.GeoCategories);
     }
 
     [Fact]
@@ -248,7 +296,7 @@ public sealed class GeoTaxonomyProcessorTests
         categories.EmitDelete("missing-category", Category("missing-category", "sport-1", null));
         await Task.Delay(50, TestContext.Current.CancellationToken);
 
-        Assert.Empty(publisher.PublishedTaxonomies);
+        Assert.Single(publisher.PublishedTaxonomies);
         Assert.Empty(publisher.DeletedSportIds);
     }
 
@@ -259,6 +307,11 @@ public sealed class GeoTaxonomyProcessorTests
         ProcessorDependencies? dependencies = null)
     {
         dependencies ??= CreateDependencies(new StoreMetadata(Guid.NewGuid(), SchemaVersion: 1, IsBoostrapCompleted: true, CreatedAt: DateTimeOffset.UtcNow));
+
+        if (publisher is FakeTaxonomyViewPublisher fakePublisher)
+        {
+            fakePublisher.OperationLog = dependencies.OperationLog;
+        }
 
         return new GeoTaxonomyProcessor(
             sports,
@@ -278,12 +331,14 @@ public sealed class GeoTaxonomyProcessorTests
         {
             CurrentStoreId = storeMetadata.StoreGenerationId.ToString("D")
         };
+        var operationLog = new List<string>();
 
         return new ProcessorDependencies(storeMetadata,
                                          checkpointStorage,
                                          new TrackingCategoryBySportIndex(),
                                          new TrackingOrphanCategoryBySportIndex(),
-                                         new TrackingGeoTaxonomyViewStorage(),
+                                         new TrackingGeoTaxonomyViewStorage(operationLog),
+                                         operationLog,
                                          new FakeUnitOfWorkFactory(checkpointStorage));
     }
 
@@ -436,12 +491,14 @@ public sealed class GeoTaxonomyProcessorTests
         public List<IReadOnlyList<GeoTaxonomyViewMessage>> PublishedLists { get; } = [];
 
         public List<string> DeletedSportIds { get; } = [];
+        public List<string>? OperationLog { get; set; }
 
         public ValueTask PublishAsync(GeoTaxonomyViewMessage taxonomy, CancellationToken cancellationToken)
         {
             lock (_gate)
             {
                 PublishedTaxonomies.Add(taxonomy);
+                OperationLog?.Add($"publish:{taxonomy.SportId}:{taxonomy.Version}");
                 _changed.TrySetResult();
                 _changed = NewCompletionSource();
             }
@@ -554,16 +611,20 @@ public sealed class GeoTaxonomyProcessorTests
                                                 TrackingCategoryBySportIndex RelationIndex,
                                                 TrackingOrphanCategoryBySportIndex PendingIndex,
                                                 TrackingGeoTaxonomyViewStorage ViewStorage,
+                                                List<string> OperationLog,
                                                 FakeUnitOfWorkFactory UnitOfWorkFactory);
 
-    private sealed class TrackingCategoryBySportIndex : ICategoryBySportIndex
+    private sealed class TrackingCategoryBySportIndex : ICategoryRelationIndex
     {
         private readonly InMemoryCategoryBySportIndex _inner = new();
 
         public int ClearCallCount { get; private set; }
 
-        public ValueTask AddCategorybySportAsync(SportId sportId, CategoryId categoryId, CancellationToken cancellationToken)
-            => _inner.AddCategorybySportAsync(sportId, categoryId, cancellationToken);
+        public ValueTask IndexCategoryAsync(CategoryRelations current, CancellationToken cancellationToken)
+            => _inner.IndexCategoryAsync(current, cancellationToken);
+
+        public ValueTask ReplaceCategoryRelationsAsync(CategoryRelations? previous, CategoryRelations current, CancellationToken cancellationToken)
+            => _inner.ReplaceCategoryRelationsAsync(previous, current, cancellationToken);
 
         public ValueTask ClearAsync(CancellationToken cancellationToken)
         {
@@ -571,36 +632,36 @@ public sealed class GeoTaxonomyProcessorTests
             return _inner.ClearAsync(cancellationToken);
         }
 
-        public ValueTask<IReadOnlySet<CategoryId>> GetCategoriesBySport(SportId sportId, CancellationToken cancellationToken)
-            => _inner.GetCategoriesBySport(sportId, cancellationToken);
+        public ValueTask<IReadOnlySet<CategoryId>> GetCategoriesBySportAsync(SportId sportId, CancellationToken cancellationToken)
+            => _inner.GetCategoriesBySportAsync(sportId, cancellationToken);
 
-        public ValueTask RemoveCategorybySportAsync(SportId sportId, CategoryId categoryId, CancellationToken cancellationToken)
-            => _inner.RemoveCategorybySportAsync(sportId, categoryId, cancellationToken);
+        public ValueTask RemoveCategoryRelationsAsync(CategoryRelations current, CancellationToken cancellationToken)
+            => _inner.RemoveCategoryRelationsAsync(current, cancellationToken);
 
-        public ValueTask ClearCategoryWithSportIdAsync(SportId sportId, CancellationToken cancellationToken)
-            => _inner.ClearCategoryWithSportIdAsync(sportId, cancellationToken);
+        public ValueTask<IReadOnlySet<CategoryId>> GetCategoriesByParentAsync(CategoryId parentCategoryId, CancellationToken cancellationToken)
+            => _inner.GetCategoriesByParentAsync(parentCategoryId, cancellationToken);
 
-        public ValueTask AddCategoryByParentAsync(CategoryId parentCategoryId, CategoryId categoryId, CancellationToken cancellationToken)
-            => _inner.AddCategoryByParentAsync(parentCategoryId, categoryId, cancellationToken);
+        public ValueTask<bool> HasCategoryBySportAsync(SportId sportId, CategoryId categoryId, CancellationToken cancellationToken)
+            => _inner.HasCategoryBySportAsync(sportId, categoryId, cancellationToken);
 
-        public ValueTask<IReadOnlySet<CategoryId>> GetCategoriesByParent(CategoryId parentCategoryId, CancellationToken cancellationToken)
-            => _inner.GetCategoriesByParent(parentCategoryId, cancellationToken);
-
-        public ValueTask RemoveCategorybyParentAsync(CategoryId parentCategoryId, CategoryId categoryId, CancellationToken cancellationToken)
-            => _inner.RemoveCategorybyParentAsync(parentCategoryId, categoryId, cancellationToken);
-
-        public ValueTask ClearCategoryWithParentAsync(CategoryId parentCategoryId, CancellationToken cancellationToken)
-            => _inner.ClearCategoryWithParentAsync(parentCategoryId, cancellationToken);
+        public ValueTask<bool> HasCategoryByParentAsync(CategoryId parentCategoryId, CategoryId categoryId, CancellationToken cancellationToken)
+            => _inner.HasCategoryByParentAsync(parentCategoryId, categoryId, cancellationToken);
     }
 
-    private sealed class TrackingOrphanCategoryBySportIndex : IOrphanCategoryBySportIndex
+    private sealed class TrackingOrphanCategoryBySportIndex : ICategoryPendingIndex
     {
         private readonly InMemoryOrphanCategoryBySportIndex _inner = new();
 
         public int ClearCallCount { get; private set; }
 
-        public ValueTask AddOrphanCategorybySportAsync(SportId sportId, CategoryId categoryId, CancellationToken cancellationToken)
-            => _inner.AddOrphanCategorybySportAsync(sportId, categoryId, cancellationToken);
+        public ValueTask<bool> TryMarkCategoryWaitingForSportAsync(SportId sportId,
+                                                                   CategoryId categoryId,
+                                                                   Func<SportId, CancellationToken, ValueTask<bool>> sportExistsCheck,
+                                                                   CancellationToken cancellationToken)
+            => _inner.TryMarkCategoryWaitingForSportAsync(sportId, categoryId, sportExistsCheck, cancellationToken);
+
+        public ValueTask ResolveCategoryWaitingForSportAsync(SportId sportId, CategoryId categoryId, CancellationToken cancellationToken)
+            => _inner.ResolveCategoryWaitingForSportAsync(sportId, categoryId, cancellationToken);
 
         public ValueTask ClearAsync(CancellationToken cancellationToken)
         {
@@ -608,39 +669,53 @@ public sealed class GeoTaxonomyProcessorTests
             return _inner.ClearAsync(cancellationToken);
         }
 
-        public ValueTask ClearOrphanCategoryWithSportIdAsync(SportId sportId, CancellationToken cancellationToken)
-            => _inner.ClearOrphanCategoryWithSportIdAsync(sportId, cancellationToken);
+        public ValueTask<IReadOnlySet<CategoryId>> GetCategoriesWaitingForSportAsync(SportId sportId, CancellationToken cancellationToken)
+            => _inner.GetCategoriesWaitingForSportAsync(sportId, cancellationToken);
 
-        public ValueTask<IReadOnlySet<CategoryId>> GetOrphanCategoriesBySport(SportId sportId, CancellationToken cancellationToken)
-            => _inner.GetOrphanCategoriesBySport(sportId, cancellationToken);
+        public ValueTask<IReadOnlySet<SportId>> GetMissingSportsForCategoryAsync(CategoryId categoryId, CancellationToken cancellationToken)
+            => _inner.GetMissingSportsForCategoryAsync(categoryId, cancellationToken);
 
-        public ValueTask RemoveOrphanCategorybySportAsync(SportId sportId, CategoryId categoryId, CancellationToken cancellationToken)
-            => _inner.RemoveOrphanCategorybySportAsync(sportId, categoryId, cancellationToken);
-
-        public ValueTask AddOrphanCategoryByParentAsync(CategoryId parentCategoryId, CategoryId categoryId, CancellationToken cancellationToken)
-            => _inner.AddOrphanCategoryByParentAsync(parentCategoryId, categoryId, cancellationToken);
-
-        public ValueTask<IReadOnlySet<CategoryId>> GetOrphanCategoriesByParent(CategoryId parentCategoryId, CancellationToken cancellationToken)
-            => _inner.GetOrphanCategoriesByParent(parentCategoryId, cancellationToken);
-
-        public ValueTask RemoveOrphanCategorybyParentAsync(CategoryId parentCategoryId, CategoryId categoryId, CancellationToken cancellationToken)
-            => _inner.RemoveOrphanCategorybyParentAsync(parentCategoryId, categoryId, cancellationToken);
-
-        public ValueTask ClearOrphanCategoryWithParentAsync(CategoryId parentCategoryId, CancellationToken cancellationToken)
-            => _inner.ClearOrphanCategoryWithParentAsync(parentCategoryId, cancellationToken);
+        public ValueTask RemoveCategoryFromPendingAsync(CategoryId categoryId, CancellationToken cancellationToken)
+            => _inner.RemoveCategoryFromPendingAsync(categoryId, cancellationToken);
     }
 
     private sealed class TrackingGeoTaxonomyViewStorage : IGeoTaxonomyViewStorage
     {
         private readonly InMemoryGeoTaxonomyViewStorage _inner = new();
+        private readonly List<string> _operationLog;
+
+        public TrackingGeoTaxonomyViewStorage(List<string> operationLog)
+            => _operationLog = operationLog;
 
         public int ClearCallCount { get; private set; }
+        public List<string> OperationLog => _operationLog;
+        public List<GeoTaxonomyViewUpsertResult> UpsertCalls { get; } = [];
 
-        public void AddTaxonomyView(SportId id, GeoTaxonomyViewMessage view)
-            => _inner.AddTaxonomyView(id, view);
+        public void SeedPublishedView(SportId id, GeoTaxonomyViewMessage view)
+        {
+            var result = _inner.UpsertViewAsync(id, view, "build-seed", CancellationToken.None).GetAwaiter().GetResult();
+            _inner.MarkViewPublishedAsync(id, result.CalculatedVersion, result.BuildGenerationId, CancellationToken.None).GetAwaiter().GetResult();
+        }
 
-        public GeoTaxonomyViewMessage? AddCategoryAsync(string sportId, GeoTaxonomyNode node, CancellationToken cancellationToken)
-            => _inner.AddCategoryAsync(sportId, node, cancellationToken);
+        public ValueTask<GeoTaxonomyViewMutationResult> UpsertSportAsync(SportId sportId, string sportName, string sportType, CancellationToken cancellationToken)
+            => _inner.UpsertSportAsync(sportId, sportName, sportType, cancellationToken);
+
+        public async ValueTask<GeoTaxonomyViewUpsertResult> UpsertViewAsync(SportId sportId, GeoTaxonomyViewMessage view, string buildGenerationId, CancellationToken cancellationToken)
+        {
+            var result = await _inner.UpsertViewAsync(sportId, view, buildGenerationId, cancellationToken);
+            UpsertCalls.Add(result);
+            _operationLog.Add($"upsert:{sportId.Value}:{result.CalculatedVersion}:{buildGenerationId}");
+            return result;
+        }
+
+        public async ValueTask MarkViewPublishedAsync(SportId sportId, long calculatedVersion, string buildGenerationId, CancellationToken cancellationToken)
+        {
+            await _inner.MarkViewPublishedAsync(sportId, calculatedVersion, buildGenerationId, cancellationToken);
+            _operationLog.Add($"mark-published:{sportId.Value}:{calculatedVersion}");
+        }
+
+        public ValueTask<GeoTaxonomyViewMutationResult> UpsertCategoryAsync(SportId sportId, GeoTaxonomyNode node, CancellationToken cancellationToken)
+            => _inner.UpsertCategoryAsync(sportId, node, cancellationToken);
 
         public ValueTask ClearAsync(CancellationToken cancellationToken)
         {
@@ -648,14 +723,17 @@ public sealed class GeoTaxonomyProcessorTests
             return _inner.ClearAsync(cancellationToken);
         }
 
-        public GeoTaxonomyViewMessage? TryGetView(SportId id)
-            => _inner.TryGetView(id);
+        public ValueTask<GeoTaxonomyViewMessage?> GetViewAsync(SportId sportId, CancellationToken cancellationToken)
+            => _inner.GetViewAsync(sportId, cancellationToken);
 
-        public ValueTask<GeoTaxonomyViewMessage?> RemoveCategoryAsync(SportId sportId, CategoryId categoryId, CancellationToken cancellationToken)
+        public ValueTask<GeoTaxonomyViewMutationResult> RemoveCategoryAsync(SportId sportId, CategoryId categoryId, CancellationToken cancellationToken)
             => _inner.RemoveCategoryAsync(sportId, categoryId, cancellationToken);
 
-        public GeoTaxonomyViewMessage? RemoveView(SportId id)
-            => _inner.RemoveView(id);
+        public ValueTask<GeoTaxonomyViewMessage?> RemoveViewAsync(SportId sportId, CancellationToken cancellationToken)
+            => _inner.RemoveViewAsync(sportId, cancellationToken);
+
+        public ValueTask<GeoTaxonomyViewMetadata?> GetMetadataAsync(SportId sportId, CancellationToken cancellationToken)
+            => _inner.GetMetadataAsync(sportId, cancellationToken);
     }
 
     private sealed class FakeCheckpointStorage : ICheckpointStorage

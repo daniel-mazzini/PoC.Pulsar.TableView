@@ -50,12 +50,12 @@ public readonly record struct StorageKey(string Value)
 
     #region keyFactory
 
-    internal const string StoreMetadata = "__geo-projector:store-metadata";
-    internal const string StoreDiagnostics = "__geo-projector:store-diagnostics";
+    public const string StoreMetadata = "__geo-projector:store-metadata";
+    public const string StoreDiagnostics = "__geo-projector:store-diagnostics";
     internal const string PrefixStoreCategoryBySport = "__geo-projector:idx:category:by-sport:";
     internal const string PrefixStoreCategoryByParent = "__geo-projector:idx:category:by-parent:";
 
-    internal const string SportMessagePrefix = "__geo-projector:raw:sport:";
+    public const string SportMessagePrefix = "__geo-projector:raw:sport:";
     public static StorageKey TopicCheckpoint(string topicName, int partitionId)
     {
         string safeTopicName = SanitizeId(topicName);
@@ -133,6 +133,12 @@ public readonly record struct StorageKey(string Value)
     {
         string safeSportId = SanitizeId(sportId.Value);
         return $"__geo-projector:mv:country-taxonomy:{safeSportId}";
+    }
+
+    public static StorageKey GeoTaxonomyViewMetadata(SportId sportId)
+    {
+        string safeSportId = SanitizeId(sportId.Value);
+        return $"__geo-projector:metadata:geo-taxonomy:{safeSportId}";
     }
 
     public static StorageKey CategoryIdsBySport(SportId sportId)
