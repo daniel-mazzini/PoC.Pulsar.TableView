@@ -1,12 +1,10 @@
 using System.Buffers;
 using System.Text.Json;
 using DotPulsar;
-using Microsoft.Extensions.Logging;
 using PoC.Pulsar.TableView.Contracts;
 using PoC.Pulsar.TableView.Domain.Checkpoints;
 using PoC.Pulsar.TableView.Domain.Metadatas;
 using PoC.Pulsar.TableView.Domain.Projector;
-using PoC.Pulsar.TableView.Domain.Sports;
 using PoC.Pulsar.TableView.Domain.TableView;
 using Xunit;
 

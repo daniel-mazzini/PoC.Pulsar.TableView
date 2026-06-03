@@ -1,13 +1,9 @@
-using DotPulsar;
-using DotPulsar.Internal;
 using PoC.Pulsar.TableView.Contracts;
-using PoC.Pulsar.TableView.Domain.Categories;
 using PoC.Pulsar.TableView.Domain.Projector;
 using PoC.Pulsar.TableView.Domain.Rejected;
 using PoC.Pulsar.TableView.Domain.Storages.StateStore;
 using PoC.Pulsar.TableView.Domain.TableView;
 using PoC.Pulsar.TableView.Infrastructure.Store.Observability;
-using PoC.Pulsar.TableView.Infrastructure.Store.Readers;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;

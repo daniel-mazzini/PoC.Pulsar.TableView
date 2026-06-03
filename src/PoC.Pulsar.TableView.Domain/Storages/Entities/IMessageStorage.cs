@@ -1,4 +1,3 @@
-using PoC.Pulsar.TableView.Contracts;
 using PoC.Pulsar.TableView.Domain.Filter;
 
 namespace PoC.Pulsar.TableView.Domain.Storages.Entities;

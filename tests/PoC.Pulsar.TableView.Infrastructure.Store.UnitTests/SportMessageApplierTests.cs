@@ -1,10 +1,7 @@
 using System.Buffers;
-using System.Text;
 using System.Text.Json;
 using PoC.Pulsar.TableView.Contracts;
 using PoC.Pulsar.TableView.Domain.Projector;
-using PoC.Pulsar.TableView.Domain.Rejected;
-using PoC.Pulsar.TableView.Domain.Sports;
 using PoC.Pulsar.TableView.Domain.TableView;
 using Xunit;
 

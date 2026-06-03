@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-
 namespace PoC.Pulsar.TableView.Contracts;
 
 public sealed record RejectedMessage<T>(

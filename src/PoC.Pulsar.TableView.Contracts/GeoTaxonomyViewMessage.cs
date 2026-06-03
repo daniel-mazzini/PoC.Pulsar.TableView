@@ -11,9 +11,7 @@ public sealed record GeoTaxonomyViewMessage
     public DateTimeOffset Timestamp { get; set; }
     public ImmutableHashSet<GeoTaxonomyNode> GeoCategories { get; init; } = [];
 
-    public GeoTaxonomyViewMessage()
-    {
-    }
+ 
 
     private GeoTaxonomyViewMessage(string sportId,
                                    string sportName,
@@ -31,6 +29,11 @@ public sealed record GeoTaxonomyViewMessage
     public static GeoTaxonomyViewMessage Create(SportMessage sport, IEnumerable<GeoTaxonomyNode> geoCategories, int version = 0)
     {
         return new GeoTaxonomyViewMessage(sport.Id, sport.Name, sport.SportType, version, geoCategories);
+
+    }
+    public static GeoTaxonomyViewMessage CreateNew(string sportId, string sportName, string sportType)
+    {
+        return new GeoTaxonomyViewMessage(sportId, sportName, sportType, 0, []);
 
     }
 }

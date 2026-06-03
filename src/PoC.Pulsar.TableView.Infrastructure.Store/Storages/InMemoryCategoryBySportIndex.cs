@@ -1,137 +1,150 @@
 using PoC.Pulsar.TableView.Domain.Categories;
 using PoC.Pulsar.TableView.Domain.Sports;
-using System.Collections.Concurrent;
+using PoC.Pulsar.TableView.Domain.Storages.StateStore;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.Storages;
 
-public sealed class InMemoryCategoryBySportIndex : ICategoryBySportIndex
-{
-    private readonly object _gate = new();
-    private readonly Dictionary<string, HashSet<CategoryId>> _bySport = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, HashSet<CategoryId>> _byParent = new(StringComparer.Ordinal);
 
-    public ValueTask AddCategorybySportAsync(SportId sportId, CategoryId categoryId, CancellationToken cancellationToken)
+public sealed class InMemoryCategoryBySportIndex : ICategoryRelationIndex
+{
+    private static readonly byte Dummy = 0;
+    private readonly ConcurrentDictionary<StorageKey, byte> _keys = new();
+
+    public ValueTask IndexCategoryAsync(CategoryRelations current, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        lock (_gate)
-        {
-            AddToMap(_bySport, sportId.Value, categoryId);
-        }
+
+        AddCurrentRelations(current);
 
         return ValueTask.CompletedTask;
+    }
+    public ValueTask<bool> HasCategoryBySportAsync(SportId sportId,
+                                                   CategoryId categoryId,
+                                                   CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var key = StorageKey.CategoryBySport(sportId, categoryId);
+
+        return ValueTask.FromResult(_keys.ContainsKey(key));
+    }
+
+    public ValueTask<IReadOnlySet<CategoryId>> GetCategoriesByParentAsync(CategoryId parentCategoryId, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var prefix = StorageKey.CategoryByParentPrefix(parentCategoryId).Value;
+
+        var result = _keys.Keys
+            .Select(key => key.Value)
+            .Where(value => value.StartsWith(prefix, StringComparison.Ordinal))
+            .Select(value => new CategoryId(value[prefix.Length..]))
+            .ToHashSet();
+
+        return ValueTask.FromResult<IReadOnlySet<CategoryId>>(result);
+    }
+
+    public ValueTask<bool> HasCategoryByParentAsync(CategoryId parentCategoryId,
+                                                    CategoryId categoryId,
+                                                    CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var key = StorageKey.CategoryByParent(parentCategoryId, categoryId);
+
+        return ValueTask.FromResult(_keys.ContainsKey(key));
     }
 
     public ValueTask ClearAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        lock (_gate)
+
+        _keys.Clear();
+
+        return ValueTask.CompletedTask;
+    }
+    public ValueTask ReplaceCategoryRelationsAsync(CategoryRelations? previous,
+                                                   CategoryRelations current,
+                                                   CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (previous is not null)
         {
-            _bySport.Clear();
-            _byParent.Clear();
+            RemoveObsoleteRelations(previous.Value, current);
+        }
+
+        AddCurrentRelations(current);
+
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask RemoveCategoryRelationsAsync(CategoryRelations current, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        Remove(StorageKey.CategoryBySport(current.SportId, current.CategoryId));
+
+        if (current.ParentCategoryId is not null)
+        {
+            Remove(StorageKey.CategoryByParent(
+                current.ParentCategoryId.Value,
+                current.CategoryId));
         }
 
         return ValueTask.CompletedTask;
     }
 
-    public ValueTask<IReadOnlySet<CategoryId>> GetCategoriesBySport(SportId sportId, CancellationToken cancellationToken)
+    public ValueTask<IReadOnlySet<CategoryId>> GetCategoriesBySportAsync(SportId sportId, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        lock (_gate)
-        {
-            return ValueTask.FromResult<IReadOnlySet<CategoryId>>(Snapshot(_bySport, sportId.Value));
-        }
+
+        var prefix = StorageKey.CategoryBySportPrefix(sportId).Value;
+
+        var result = _keys.Keys
+            .Select(key => key.Value)
+            .Where(value => value.StartsWith(prefix, StringComparison.Ordinal))
+            .Select(value => new CategoryId(value[prefix.Length..]))
+            .ToHashSet();
+
+        return ValueTask.FromResult<IReadOnlySet<CategoryId>>(result);
     }
 
-    public ValueTask RemoveCategorybySportAsync(SportId sportId, CategoryId categoryId, CancellationToken cancellationToken)
+    private void AddCurrentRelations(CategoryRelations current)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        lock (_gate)
-        {
-            RemoveFromMap(_bySport, sportId.Value, categoryId);
-        }
+        Add(StorageKey.CategoryBySport(current.SportId, current.CategoryId));
 
-        return ValueTask.CompletedTask;
+        if (current.ParentCategoryId is not null)
+        {
+            Add(StorageKey.CategoryByParent(current.ParentCategoryId.Value, current.CategoryId));
+        }
     }
 
-    public ValueTask ClearCategoryWithSportIdAsync(SportId sportId, CancellationToken cancellationToken)
+    private void RemoveObsoleteRelations(CategoryRelations previous, CategoryRelations current)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        lock (_gate)
+        if (previous.SportId != current.SportId ||
+            previous.CategoryId != current.CategoryId)
         {
-            _bySport.Remove(sportId.Value);
+            Remove(StorageKey.CategoryBySport(previous.SportId, previous.CategoryId));
         }
 
-        return ValueTask.CompletedTask;
+        if (previous.ParentCategoryId is not null &&
+            (previous.ParentCategoryId != current.ParentCategoryId ||
+             previous.CategoryId != current.CategoryId))
+        {
+            Remove(StorageKey.CategoryByParent(previous.ParentCategoryId.Value, previous.CategoryId));
+        }
     }
 
-    public ValueTask AddCategoryByParentAsync(CategoryId parentCategoryId, CategoryId categoryId, CancellationToken cancellationToken)
+    private void Add(StorageKey key)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        lock (_gate)
-        {
-            AddToMap(_byParent, parentCategoryId.Value, categoryId);
-        }
-
-        return ValueTask.CompletedTask;
+        _keys.TryAdd(key, Dummy);
     }
 
-    public ValueTask<IReadOnlySet<CategoryId>> GetCategoriesByParent(CategoryId parentCategoryId, CancellationToken cancellationToken)
+    private void Remove(StorageKey key)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        lock (_gate)
-        {
-            return ValueTask.FromResult<IReadOnlySet<CategoryId>>(Snapshot(_byParent, parentCategoryId.Value));
-        }
+        _keys.TryRemove(key, out _);
     }
-
-    public ValueTask RemoveCategorybyParentAsync(CategoryId parentCategoryId, CategoryId categoryId, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        lock (_gate)
-        {
-            RemoveFromMap(_byParent, parentCategoryId.Value, categoryId);
-        }
-
-        return ValueTask.CompletedTask;
-    }
-
-    public ValueTask ClearCategoryWithParentAsync(CategoryId parentCategoryId, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        lock (_gate)
-        {
-            _byParent.Remove(parentCategoryId.Value);
-        }
-
-        return ValueTask.CompletedTask;
-    }
-
-    private static void AddToMap(Dictionary<string, HashSet<CategoryId>> map, string key, CategoryId categoryId)
-    {
-        if (!map.TryGetValue(key, out var values))
-        {
-            values = [];
-            map[key] = values;
-        }
-
-        values.Add(categoryId);
-    }
-
-    private static void RemoveFromMap(Dictionary<string, HashSet<CategoryId>> map, string key, CategoryId categoryId)
-    {
-        if (!map.TryGetValue(key, out var values))
-        {
-            return;
-        }
-
-        values.Remove(categoryId);
-        if (values.Count == 0)
-        {
-            map.Remove(key);
-        }
-    }
-
-    private static IReadOnlySet<CategoryId> Snapshot(Dictionary<string, HashSet<CategoryId>> map, string key)
-        => map.TryGetValue(key, out var values) ? new HashSet<CategoryId>(values) : new HashSet<CategoryId>();
 }

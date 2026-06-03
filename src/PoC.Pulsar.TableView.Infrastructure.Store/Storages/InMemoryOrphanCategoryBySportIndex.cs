@@ -1,136 +1,109 @@
+using System.Collections.Generic;
+using System.Linq;
 using PoC.Pulsar.TableView.Domain.Categories;
 using PoC.Pulsar.TableView.Domain.Sports;
-using System.Collections.Generic;
+using PoC.Pulsar.TableView.Domain.Storages.StateStore;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.Storages;
 
-public sealed class InMemoryOrphanCategoryBySportIndex : IOrphanCategoryBySportIndex
+public sealed class InMemoryOrphanCategoryBySportIndex : ICategoryPendingIndex
 {
-    private readonly object _gate = new();
-    private readonly Dictionary<string, HashSet<CategoryId>> _bySport = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, HashSet<CategoryId>> _byParent = new(StringComparer.Ordinal);
-
-    public ValueTask AddOrphanCategorybySportAsync(SportId sportId, CategoryId categoryId, CancellationToken cancellationToken)
+    private static readonly byte Dummy = 0;
+    private readonly ConcurrentDictionary<StorageKey, byte> _store = new();
+    public async ValueTask<bool> TryMarkCategoryWaitingForSportAsync(SportId sportId,
+                                                               CategoryId categoryId,
+                                                               Func<SportId, CancellationToken, ValueTask<bool>> sportExistsCheck,
+                                                               CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        lock (_gate)
+
+        if (await sportExistsCheck(sportId, cancellationToken))
         {
-            AddToMap(_bySport, sportId.Value, categoryId);
+            return false;
         }
 
+        var key = StorageKey.OrphanCategoryBySport(sportId, categoryId);
+
+        _store.TryAdd(key, Dummy);
+
+        // doble check
+        if (await sportExistsCheck(sportId, cancellationToken))
+        {
+            _store.TryRemove(key, out _);
+            return false;
+        }
+
+        return true;
+    }
+    public ValueTask ResolveCategoryWaitingForSportAsync(SportId sportId,
+                                                         CategoryId categoryId,
+                                                         CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        RemovePendingKeys(sportId, categoryId);
+
         return ValueTask.CompletedTask;
+    }
+
+    public ValueTask<IReadOnlySet<CategoryId>> GetCategoriesWaitingForSportAsync(SportId sportId, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var prefix = StorageKey.OrphanCategoryBySportPrefix(sportId).Value;
+
+        var result = _store.Keys
+            .Select(key => key.Value)
+            .Where(value => value.StartsWith(prefix, StringComparison.Ordinal))
+            .Select(value => new CategoryId(value[prefix.Length..]))
+            .ToHashSet();
+
+        return ValueTask.FromResult<IReadOnlySet<CategoryId>>(result);
+    }
+
+    public ValueTask<IReadOnlySet<SportId>> GetMissingSportsForCategoryAsync(CategoryId categoryId, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var prefix = StorageKey.OrphanSportByCategoryPrefix(categoryId).Value;
+
+        var result = _store.Keys
+            .Select(key => key.Value)
+            .Where(value => value.StartsWith(prefix, StringComparison.Ordinal))
+            .Select(value => new SportId(value[prefix.Length..]))
+            .ToHashSet();
+
+        return ValueTask.FromResult<IReadOnlySet<SportId>>(result);
+    }
+
+    public async ValueTask RemoveCategoryFromPendingAsync(CategoryId categoryId, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var missingSports = await GetMissingSportsForCategoryAsync(categoryId, cancellationToken);
+
+        foreach (var sportId in missingSports)
+        {
+            RemovePendingKeys(sportId, categoryId);
+        }
+    }
+
+    private void RemovePendingKeys(SportId sportId, CategoryId categoryId)
+    {
+        _store.TryRemove(StorageKey.OrphanCategoryBySport(sportId, categoryId),
+                         out _);
+
+        _store.TryRemove(StorageKey.OrphanSportByCategory(categoryId, sportId),
+                         out _);
     }
 
     public ValueTask ClearAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        lock (_gate)
-        {
-            _bySport.Clear();
-            _byParent.Clear();
-        }
+
+        _store.Clear();
 
         return ValueTask.CompletedTask;
     }
 
-    public ValueTask ClearOrphanCategoryWithSportIdAsync(SportId sportId, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        lock (_gate)
-        {
-            _bySport.Remove(sportId.Value);
-        }
-
-        return ValueTask.CompletedTask;
-    }
-
-    public ValueTask<IReadOnlySet<CategoryId>> GetOrphanCategoriesBySport(SportId sportId, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        lock (_gate)
-        {
-            return ValueTask.FromResult<IReadOnlySet<CategoryId>>(Snapshot(_bySport, sportId.Value));
-        }
-    }
-
-    public ValueTask RemoveOrphanCategorybySportAsync(SportId sportId, CategoryId categoryId, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        lock (_gate)
-        {
-            RemoveFromMap(_bySport, sportId.Value, categoryId);
-        }
-
-        return ValueTask.CompletedTask;
-    }
-
-    public ValueTask AddOrphanCategoryByParentAsync(CategoryId parentCategoryId, CategoryId categoryId, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        lock (_gate)
-        {
-            AddToMap(_byParent, parentCategoryId.Value, categoryId);
-        }
-
-        return ValueTask.CompletedTask;
-    }
-
-    public ValueTask<IReadOnlySet<CategoryId>> GetOrphanCategoriesByParent(CategoryId parentCategoryId, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        lock (_gate)
-        {
-            return ValueTask.FromResult<IReadOnlySet<CategoryId>>(Snapshot(_byParent, parentCategoryId.Value));
-        }
-    }
-
-    public ValueTask RemoveOrphanCategorybyParentAsync(CategoryId parentCategoryId, CategoryId categoryId, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        lock (_gate)
-        {
-            RemoveFromMap(_byParent, parentCategoryId.Value, categoryId);
-        }
-
-        return ValueTask.CompletedTask;
-    }
-
-    public ValueTask ClearOrphanCategoryWithParentAsync(CategoryId parentCategoryId, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        lock (_gate)
-        {
-            _byParent.Remove(parentCategoryId.Value);
-        }
-
-        return ValueTask.CompletedTask;
-    }
-
-    private static void AddToMap(Dictionary<string, HashSet<CategoryId>> map, string key, CategoryId categoryId)
-    {
-        if (!map.TryGetValue(key, out var values))
-        {
-            values = [];
-            map[key] = values;
-        }
-
-        values.Add(categoryId);
-    }
-
-    private static void RemoveFromMap(Dictionary<string, HashSet<CategoryId>> map, string key, CategoryId categoryId)
-    {
-        if (!map.TryGetValue(key, out var values))
-        {
-            return;
-        }
-
-        values.Remove(categoryId);
-        if (values.Count == 0)
-        {
-            map.Remove(key);
-        }
-    }
-
-    private static IReadOnlySet<CategoryId> Snapshot(Dictionary<string, HashSet<CategoryId>> map, string key)
-        => map.TryGetValue(key, out var values) ? new HashSet<CategoryId>(values) : new HashSet<CategoryId>();
 }

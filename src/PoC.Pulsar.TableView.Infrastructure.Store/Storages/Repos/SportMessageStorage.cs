@@ -1,5 +1,4 @@
-﻿using Garnet.server;
-using PoC.Pulsar.TableView.Contracts;
+﻿using PoC.Pulsar.TableView.Contracts;
 using PoC.Pulsar.TableView.Domain.Filter;
 using PoC.Pulsar.TableView.Domain.Serializers;
 using PoC.Pulsar.TableView.Domain.Sports;

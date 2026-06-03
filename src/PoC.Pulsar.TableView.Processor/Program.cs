@@ -90,19 +90,18 @@ var categoriesView = new PulsarTableView<RawCategoryMessage>(
     metadata,
     loggerFactory.CreateLogger<PulsarTableView<RawCategoryMessage>>());
 
-ICategoryBySportIndex categoryBySportIndex = new InMemoryCategoryBySportIndex();
-IOrphanCategoryBySportIndex orphanCategoryBySportIndex = new InMemoryOrphanCategoryBySportIndex();
+ICategoryRelationIndex categoryBySportIndex = new InMemoryCategoryBySportIndex();
+ICategoryPendingIndex orphanCategoryBySportIndex = new InMemoryOrphanCategoryBySportIndex();
 IGeoTaxonomyViewStorage taxonomyViewStorage = new InMemoryGeoTaxonomyViewStorage();
-var processor = new GeoTaxonomyProcessor(
-    sportsView,
-    categoriesView,
-    projectorPublisher,
-    categoryBySportIndex,
-    orphanCategoryBySportIndex,
-    taxonomyViewStorage,
-    unitOfWorkFactory,
-    metadata,
-    loggerFactory.CreateLogger<GeoTaxonomyProcessor>());
+var processor = new GeoTaxonomyProcessor(sportsView,
+                                         categoriesView,
+                                         projectorPublisher,
+                                         categoryBySportIndex,
+                                         orphanCategoryBySportIndex,
+                                         taxonomyViewStorage,
+                                         unitOfWorkFactory,
+                                         metadata,
+                                         loggerFactory.CreateLogger<GeoTaxonomyProcessor>());
 
 await processor.RunAsync(cts.Token);
 
