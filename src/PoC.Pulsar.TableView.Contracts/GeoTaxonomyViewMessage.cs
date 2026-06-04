@@ -11,7 +11,7 @@ public sealed record GeoTaxonomyViewMessage
     public DateTimeOffset Timestamp { get; set; }
     public ImmutableHashSet<GeoTaxonomyNode> GeoCategories { get; init; } = [];
 
- 
+    GeoTaxonomyViewMessage() { }
 
     private GeoTaxonomyViewMessage(string sportId,
                                    string sportName,

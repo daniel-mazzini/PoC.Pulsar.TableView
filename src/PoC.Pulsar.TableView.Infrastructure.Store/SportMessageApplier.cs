@@ -95,9 +95,9 @@ public class SportMessageApplier : ITableViewMessageApplier<SportMessage>
         await SaveRejectedAsync(uow, rejectedMessage, cancellationToken);
         await PublishRejectedAsync(rejectedMessage, headers, cancellationToken);
     }
-    private static (RejectedMessage<SportMessage> message, Dictionary<string,string> headers) CreateSportRejectedWrite(TableViewMessage originalMessage, SportMessage? sportMessage, RejectedReason reason)
+    private static (Rejected<SportMessage> message, Dictionary<string,string> headers) CreateSportRejectedWrite(TableViewMessage originalMessage, SportMessage? sportMessage, RejectedReason reason)
     {
-        RejectedMessage<SportMessage> rejectedMessage = sportMessage is null
+        Rejected<SportMessage> rejectedMessage = sportMessage is null
             ? RejectedFactory.CreateFromTombStone<SportMessage>(originalMessage, reason)
             : RejectedFactory.CreateFromPayload(sportMessage, originalMessage, reason);
 
@@ -106,7 +106,7 @@ public class SportMessageApplier : ITableViewMessageApplier<SportMessage>
         var rejectedMessageId = rejectedMessage.RejectedId.ToString("D");
 
 
-        var headers = CreateRejectedHeaders(nameof(RejectedMessage<SportMessage>),
+        var headers = CreateRejectedHeaders(nameof(Rejected<SportMessage>),
                                             "sport-rejected",
                                             rejectedMessage.RejectedAt,
                                             correlationId,
@@ -148,7 +148,7 @@ public class SportMessageApplier : ITableViewMessageApplier<SportMessage>
             output[name] = value;
         }
     }
-    private async Task PublishRejectedAsync(RejectedMessage<SportMessage> rejectedMessage, Dictionary<string,string> headers, CancellationToken cancellationToken)
+    private async Task PublishRejectedAsync(Rejected<SportMessage> rejectedMessage, Dictionary<string,string> headers, CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
         var tags = new[]
@@ -191,12 +191,12 @@ public class SportMessageApplier : ITableViewMessageApplier<SportMessage>
     }
 
     private static async Task SaveRejectedAsync(ITableViewUnitOfWork<SportMessage> uow,
-                                                RejectedMessage<SportMessage> input,
+                                                Rejected<SportMessage> input,
                                                 CancellationToken cancellationToken)
         => await uow.RejectedStorage.SaveRejectedRecordAsync(rejectedProjection: new RejectedProjection(input.OriginalMessageKey,
                                                                                                         input.OriginalTopic,
                                                                                                         input.OriginalPartitionId,
-                                                                                                        new RejectedReason(input.Reason.ReasonCode, input.Reason.Reason),
+                                                                                                        input.Reason,
                                                                                                         DateTimeOffset.UtcNow),
                                                               cancellationToken);
 

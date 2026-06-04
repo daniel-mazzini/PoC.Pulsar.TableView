@@ -1,4 +1,4 @@
-﻿using DotPulsar;
+using DotPulsar;
 using DotPulsar.Abstractions;
 using DotPulsar.Extensions;
 using Microsoft.IO;
@@ -18,6 +18,8 @@ namespace PoC.Pulsar.TableView.Infrastructure.Store.Publisher;
 [ExcludeFromCodeCoverage(Justification = "Integration adapter around real DotPulsar producers.")]
 public sealed class DotPulsarRejectedMessagePublisher : IRejectedMessagePublisher, IAsyncDisposable
 {
+    private const int Memory1K = 1024;
+
     private readonly IProducer<ReadOnlySequence<byte>> _sportRejectedProducer;
     private readonly IProducer<ReadOnlySequence<byte>> _categoryRejectedProducer;
     private readonly IAvroSerializer _avroSerializer;
@@ -33,30 +35,41 @@ public sealed class DotPulsarRejectedMessagePublisher : IRejectedMessagePublishe
         _avroSerializer = avroSerializer;
     }
 
-    public async Task PublishAsync<TMessage>(RejectedMessage<TMessage> write, Dictionary<string, string> headers, CancellationToken cancellationToken)
+    public async Task PublishAsync<TMessage>(Rejected<TMessage> rejected, Dictionary<string, string> headers, CancellationToken cancellationToken)
     {
         using var activity = ProjectorStoreTelemetry.StartActivity("projection.rejected.publish",
-                                                                   PulsarTopics.CountryTaxonomyViews,
-                                                                   operation: "Publish");
-        activity?.SetTag("message_type", nameof(RejectedMessage<TMessage>));
-        
+                                                                    PulsarTopics.CountryTaxonomyViews,
+                                                                    operation: "Publish");
+        activity?.SetTag("message_type", nameof(Rejected<TMessage>));
 
         var metadata = new MessageMetadata
-                                {
-                                    Key = write.OriginalMessageKey,
-                                    EventTimeAsDateTimeOffset = write.RejectedAt,
-                                    DeliverAtTimeAsDateTimeOffset = DateTimeOffset.UtcNow
-                                };
+        {
+            Key = rejected.OriginalMessageKey,
+            EventTimeAsDateTimeOffset = rejected.RejectedAt.ToUniversalTime(),
+            DeliverAtTimeAsDateTimeOffset = DateTimeOffset.UtcNow
+        };
         foreach (var h in headers) metadata[h.Key] = h.Value;
-        var producer = write.OriginalTopic == PulsarTopics.Sports ? _sportRejectedProducer : _categoryRejectedProducer;
-        activity?.SetTag("event_type", write.OriginalTopic == PulsarTopics.SportsRejected ? "sport-rejected" : "category-rejected");
 
-        await SendOne(producer, write, activity, metadata, cancellationToken);
+        if (rejected is Rejected<SportMessage> sportRejected)
+        {
+            activity?.SetTag("event_type", "sport-rejected");
+            await SendOne(_sportRejectedProducer, ToMessage(sportRejected), activity, metadata, cancellationToken);
+            return;
+        }
+
+        if (rejected is Rejected<RawCategoryMessage> categoryRejected)
+        {
+            activity?.SetTag("event_type", "category-rejected");
+            await SendOne(_categoryRejectedProducer, ToMessage(categoryRejected), activity, metadata, cancellationToken);
+            return;
+        }
+
+        throw new NotSupportedException($"Rejected payload type {typeof(TMessage).Name} is not supported.");
     }
-    private const int memory_1K = 1024;
-    private async Task SendOne<TMessage>(IProducer<ReadOnlySequence<byte>> producer, RejectedMessage<TMessage> message, Activity? activity, MessageMetadata metadata, CancellationToken cancellationToken)
+
+    private async Task SendOne<TMessage>(IProducer<ReadOnlySequence<byte>> producer, TMessage message, Activity? activity, MessageMetadata metadata, CancellationToken cancellationToken)
     {
-        byte[] buffer = ArrayPool<byte>.Shared.Rent(memory_1K);
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(Memory1K);
         try
         {
             using var stream = new MemoryStream(buffer);
@@ -81,16 +94,42 @@ public sealed class DotPulsarRejectedMessagePublisher : IRejectedMessagePublishe
         {
             ArrayPool<byte>.Shared.Return(buffer);
         }
-        // not so good performance, but more secure option, used as fallback 
+
         using RecyclableMemoryStream dynamicStream = MemoryManager.Instance.GetStream();
         _avroSerializer.Serialize(message, dynamicStream);
         await producer.Send(metadata, dynamicStream.GetReadOnlySequence(), cancellationToken);
         activity?.SetTag("result", "success_slowpath");
     }
+
+    private static SportRejectedMessage ToMessage(Rejected<SportMessage> rejected)
+        => new(rejected.RejectedId,
+               rejected.OriginalTopic,
+               rejected.OriginalPartitionId,
+               rejected.OriginalBrokerMessageId,
+               rejected.OriginalMessageKey,
+               new RejectedReasonMessage(rejected.Reason.Code, rejected.Reason.Description),
+               rejected.OriginalPayload,
+               rejected.RejectedAt.ToUniversalTime(),
+               rejected.OriginalCorrelationId,
+               rejected.OriginalCausationId,
+               rejected.OriginalMessageId);
+
+    private static RawCategoryRejectedMessage ToMessage(Rejected<RawCategoryMessage> rejected)
+        => new(rejected.RejectedId,
+               rejected.OriginalTopic,
+               rejected.OriginalPartitionId,
+               rejected.OriginalBrokerMessageId,
+               rejected.OriginalMessageKey,
+               new RejectedReasonMessage(rejected.Reason.Code, rejected.Reason.Description),
+               rejected.OriginalPayload,
+               rejected.RejectedAt.ToUniversalTime(),
+               rejected.OriginalCorrelationId,
+               rejected.OriginalCausationId,
+               rejected.OriginalMessageId);
+
     public async ValueTask DisposeAsync()
     {
         await _sportRejectedProducer.DisposeAsync();
         await _categoryRejectedProducer.DisposeAsync();
     }
-
 }

@@ -1,4 +1,4 @@
-﻿using Chr.Avro.Abstract;
+using Chr.Avro.Abstract;
 using Chr.Avro.Serialization;
 using PoC.Pulsar.TableView.Domain.Serializers;
 using System.Buffers;
@@ -36,6 +36,7 @@ public class AvroSerializer : IAvroSerializer
         var writer = new BinaryWriter(output);
         serializerAction.DynamicInvoke(message, writer);
     }
+
     public T Deserialize<T>(ReadOnlySequence<byte> data)
     {
         var deserializer = (BinaryDeserializer<T>)_deserialization.GetOrAdd(typeof(T), _ =>
@@ -84,12 +85,12 @@ public class AvroSerializer : IAvroSerializer
         {
             return Deserialize<T>(segment.AsSpan((int)ms.Position, (int)(ms.Length - ms.Position)));
         }
+
         using var msBuffer = new MemoryStream();
         await stream.CopyToAsync(msBuffer, cancellationToken);
         return Deserialize<T>(msBuffer.GetBuffer().AsSpan(0, (int)msBuffer.Length));
     }
+
     private Schema GetSchema<T>() =>
         _registerSchemas.TryGetValue(typeof(T), out var s) ? s : throw new Exception($"Schema {typeof(T).Name} no registered.");
-
-    
 }

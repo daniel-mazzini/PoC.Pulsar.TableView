@@ -144,6 +144,95 @@ public sealed class AvroMessageDeserializerTests
     }
 
     [Fact]
+    public void serialize_and_deserialize_should_round_trip_rejected_sport_message()
+    {
+        var serializer = CreateSerializer<SportRejectedMessage>("SportRejectedMessage.avsc");
+        var payload = new SportMessage
+        {
+            Id = "sport-1",
+            Provider = "provider-a",
+            EntityCoverage = "global",
+            Name = "Football",
+            Version = 3,
+            SportType = "team",
+            ExternalEntities =
+            [
+                new ExternalEntity
+                {
+                    Id = "ext-1",
+                    Provider = "provider-b",
+                    EntityCoverage = "regional",
+                    DefaultName = "Futbol"
+                }
+            ]
+        };
+        var message = new SportRejectedMessage(
+            RejectedId: Guid.Parse("11111111-1111-1111-1111-111111111111"),
+            OriginalTopic: "sports",
+            OriginalPartitionId: 2,
+            OriginalBrokerMessageId: "broker-1",
+            OriginalMessageKey: "sport-1",
+            Reason: new RejectedReasonMessage("name_empty", "Sport name is required"),
+            OriginalPayload: payload,
+            RejectedAt: new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
+            OriginalCorrelationId: "correlation-1",
+            OriginalCausationId: "causation-1",
+            OriginalMessageId: "message-1");
+
+        var bytes = serialize_to_bytes(serializer, message);
+        var roundTrip = serializer.Deserialize<SportRejectedMessage>(new ReadOnlySequence<byte>(bytes));
+
+        Assert.Equal(message.RejectedId, roundTrip.RejectedId);
+        Assert.Equal(message.OriginalTopic, roundTrip.OriginalTopic);
+        Assert.Equal(message.OriginalPartitionId, roundTrip.OriginalPartitionId);
+        Assert.Equal(message.OriginalBrokerMessageId, roundTrip.OriginalBrokerMessageId);
+        Assert.Equal(message.OriginalMessageKey, roundTrip.OriginalMessageKey);
+        Assert.Equal(message.Reason.ReasonCode, roundTrip.Reason.ReasonCode);
+        Assert.Equal(message.Reason.Reason, roundTrip.Reason.Reason);
+        Assert.NotNull(roundTrip.OriginalPayload);
+        Assert.Equal(payload.Id, roundTrip.OriginalPayload.Id);
+        Assert.Equal(payload.Name, roundTrip.OriginalPayload.Name);
+        Assert.Equal(message.RejectedAt, roundTrip.RejectedAt);
+        Assert.Equal(message.OriginalCorrelationId, roundTrip.OriginalCorrelationId);
+        Assert.Equal(message.OriginalCausationId, roundTrip.OriginalCausationId);
+        Assert.Equal(message.OriginalMessageId, roundTrip.OriginalMessageId);
+    }
+
+    [Fact]
+    public void serialize_and_deserialize_should_round_trip_rejected_raw_category_message_with_null_payload()
+    {
+        var serializer = CreateSerializer<RawCategoryRejectedMessage>("RawCategoryRejectedMessage.avsc");
+        var message = new RawCategoryRejectedMessage(
+            RejectedId: Guid.Parse("22222222-2222-2222-2222-222222222222"),
+            OriginalTopic: "categories",
+            OriginalPartitionId: 3,
+            OriginalBrokerMessageId: "broker-2",
+            OriginalMessageKey: "category-1",
+            Reason: new RejectedReasonMessage("tombstone", "Category payload was null"),
+            OriginalPayload: null,
+            RejectedAt: new DateTimeOffset(2026, 1, 2, 0, 0, 0, TimeSpan.Zero),
+            OriginalCorrelationId: null,
+            OriginalCausationId: "causation-2",
+            OriginalMessageId: null);
+
+        var bytes = serialize_to_bytes(serializer, message);
+        var roundTrip = serializer.Deserialize<RawCategoryRejectedMessage>(new ReadOnlySequence<byte>(bytes));
+
+        Assert.Equal(message.RejectedId, roundTrip.RejectedId);
+        Assert.Equal(message.OriginalTopic, roundTrip.OriginalTopic);
+        Assert.Equal(message.OriginalPartitionId, roundTrip.OriginalPartitionId);
+        Assert.Equal(message.OriginalBrokerMessageId, roundTrip.OriginalBrokerMessageId);
+        Assert.Equal(message.OriginalMessageKey, roundTrip.OriginalMessageKey);
+        Assert.Equal(message.Reason.ReasonCode, roundTrip.Reason.ReasonCode);
+        Assert.Equal(message.Reason.Reason, roundTrip.Reason.Reason);
+        Assert.Null(roundTrip.OriginalPayload);
+        Assert.Equal(message.RejectedAt, roundTrip.RejectedAt);
+        Assert.Null(roundTrip.OriginalCorrelationId);
+        Assert.Equal(message.OriginalCausationId, roundTrip.OriginalCausationId);
+        Assert.Null(roundTrip.OriginalMessageId);
+    }
+
+    [Fact]
     public async Task byte_array_pipe_writer_array_pool_stream_and_recyclable_stream_serialization_should_match_for_geo_taxonomy_view_message()
     {
         var serializer = CreateSerializer<GeoTaxonomyViewMessage>("GeoTaxonomyViewMessage.avsc");
@@ -178,7 +267,7 @@ public sealed class AvroMessageDeserializerTests
         where T : class
     {
         var registry = new AvroSchemaRegistry();
-        registry.Register<T>(Path.Combine("Schemas", schemaName));
+        registry.Register<T>(Path.Combine("AvroSchemas", schemaName));
         return registry.Build();
     }
 

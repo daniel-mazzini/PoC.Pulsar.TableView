@@ -153,7 +153,7 @@ public sealed class AvroRoundTripTests
 
     private static string ReadSchemaJson(string schemaFileName)
     {
-        var schemaPath = Path.Combine(AppContext.BaseDirectory, "Schemas", schemaFileName);
+        var schemaPath = Path.Combine(AppContext.BaseDirectory, "AvroSchemas", schemaFileName);
 
         return File.ReadAllText(schemaPath);
     }

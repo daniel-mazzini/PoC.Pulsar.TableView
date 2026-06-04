@@ -19,7 +19,7 @@
 		<ProjectReference Include="..\PoC.Pulsar.TableView.Contracts\PoC.Pulsar.TableView.Contracts.csproj" />
 		<ProjectReference Include="..\PoC.Pulsar.TableView.Domain\PoC.Pulsar.TableView.Domain.csproj" />
 		<ProjectReference Include="..\PoC.Pulsar.TableView.Infrastructure.Store\PoC.Pulsar.TableView.Infrastructure.Store.csproj" />
-		<None Include="..\PoC.Pulsar.TableView.Contracts\Schemas\*.avsc" Link="Schemas\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+		<None Include="..\PoC.Pulsar.TableView.Contracts\AvroSchemas\*.avsc" Link="AvroSchemas\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
 	</ItemGroup>
 
 </Project>

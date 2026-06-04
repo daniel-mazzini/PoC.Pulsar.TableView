@@ -9,7 +9,7 @@ internal static class WorkspacePaths
 
     public static string ResolveSchemaFolder()
     {
-        return ResolveFolder("Schemas", "SportMessage.avsc");
+        return ResolveFolder("AvroSchemas", "SportMessage.avsc");
     }
 
     private static string ResolveFolder(params string[] pathSegments)

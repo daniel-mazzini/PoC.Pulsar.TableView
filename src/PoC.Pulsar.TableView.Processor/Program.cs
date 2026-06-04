@@ -52,8 +52,11 @@ loggerFactory.CreateLogger<Program>()
 
 // Message serialization
 AvroSchemaRegistry avroSchemaRegistry = new AvroSchemaRegistry();
-avroSchemaRegistry.Register<SportMessage>("./Schemas/SportMessage");
-avroSchemaRegistry.Register<RawCategoryMessage>("./Schemas/RawCategoryMessage");
+avroSchemaRegistry.Register<SportMessage>("./AvroSchemas/SportMessage.avsc");
+avroSchemaRegistry.Register<RawCategoryMessage>("./AvroSchemas/RawCategoryMessage.avsc");
+avroSchemaRegistry.Register<GeoTaxonomyViewMessage>("./AvroSchemas/GeoTaxonomyViewMessage.avsc");
+avroSchemaRegistry.Register<SportRejectedMessage>("./AvroSchemas/SportRejectedMessage.avsc");
+avroSchemaRegistry.Register<RawCategoryRejectedMessage>("./AvroSchemas/RawCategoryRejectedMessage.avsc");
 var avroSerializer = avroSchemaRegistry.Build();
 
 // Metadata storage

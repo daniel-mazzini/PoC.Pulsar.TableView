@@ -1,0 +1,67 @@
+{
+  "type": "record",
+  "name": "RawCategoryRejectedMessage",
+  "namespace": "PoC.Pulsar.TableView.Contracts",
+  "fields": [
+    { "name": "RejectedId", "type": { "type": "string", "logicalType": "uuid" } },
+    { "name": "OriginalTopic", "type": "string" },
+    { "name": "OriginalPartitionId", "type": "int" },
+    { "name": "OriginalBrokerMessageId", "type": "string" },
+    { "name": "OriginalMessageKey", "type": "string" },
+    {
+      "name": "Reason",
+      "type": {
+        "type": "record",
+        "name": "RejectedReasonMessage",
+        "fields": [
+          { "name": "ReasonCode", "type": "string" },
+          { "name": "Reason", "type": "string" }
+        ]
+      }
+    },
+    {
+      "name": "OriginalPayload",
+      "type": [
+        "null",
+        {
+          "type": "record",
+          "name": "RawCategoryMessage",
+          "fields": [
+            { "name": "Id", "type": "string" },
+            { "name": "Provider", "type": "string" },
+            { "name": "EntityCoverage", "type": "string" },
+            {
+              "name": "ExternalEntities",
+              "type": {
+                "type": "array",
+                "items": {
+                  "type": "record",
+                  "name": "ExternalEntity",
+                  "fields": [
+                    { "name": "Id", "type": "string" },
+                    { "name": "Provider", "type": "string" },
+                    { "name": "EntityCoverage", "type": "string" },
+                    { "name": "DefaultName", "type": "string" }
+                  ]
+                }
+              },
+              "default": []
+            },
+            { "name": "Name", "type": "string" },
+            { "name": "Version", "type": "int" },
+            { "name": "SportId", "type": "string" },
+            { "name": "ParentId", "type": ["null", "string"], "default": null },
+            { "name": "SportType", "type": ["null", "string"], "default": null },
+            { "name": "CountryCode", "type": ["null", "string"], "default": null },
+            { "name": "Gender", "type": ["null", "string"], "default": null }
+          ]
+        }
+      ],
+      "default": null
+    },
+    { "name": "RejectedAt", "type": { "type": "long", "logicalType": "timestamp-millis" } },
+    { "name": "OriginalCorrelationId", "type": ["null", "string"], "default": null },
+    { "name": "OriginalCausationId", "type": ["null", "string"], "default": null },
+    { "name": "OriginalMessageId", "type": ["null", "string"], "default": null }
+  ]
+}

@@ -35,7 +35,7 @@ internal sealed class FakeRejectedMessagePublisher : IRejectedMessagePublisher
     public List<object> PublishedMessages { get; } = [];
     public List<Dictionary<string, string>> PublishedHeaders { get; } = [];
 
-    public Task PublishAsync<TMessage>(RejectedMessage<TMessage> write, Dictionary<string, string> headers, CancellationToken cancellationToken)
+    public Task PublishAsync<TMessage>(Rejected<TMessage> write, Dictionary<string, string> headers, CancellationToken cancellationToken)
     {
         PublishedMessages.Add(write!);
         PublishedHeaders.Add(new Dictionary<string, string>(headers, StringComparer.Ordinal));

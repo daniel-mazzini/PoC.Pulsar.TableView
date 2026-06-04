@@ -1,6 +1,6 @@
 {
   "type": "record",
-  "name": "GeoTaxonomyMessage",
+  "name": "GeoTaxonomyViewMessage",
   "namespace": "PoC.Pulsar.TableView.Contracts",
   "fields": [
     { "name": "SportId", "type": "string" },

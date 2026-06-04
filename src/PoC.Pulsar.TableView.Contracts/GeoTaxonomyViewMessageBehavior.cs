@@ -13,12 +13,6 @@ public static class GeoTaxonomyViewMessageBehavior
 
             return view with { GeoCategories = newCategories, Version = view.Version + 1 };
         }
-
-        public GeoTaxonomyViewMessage RemoveItem(string categoryId)
-        {
-            var item = view.GeoCategories.FirstOrDefault(c => c.CategoryId == categoryId);
-            return item is null ? view : view with { GeoCategories = view.GeoCategories.Remove(item), Version = view.Version + 1 };
-        }
     }
 }
 

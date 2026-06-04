@@ -16,10 +16,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\PoC.Pulsar.TableView.Contracts\PoC.Pulsar.TableView.Contracts.csproj" />
-    <None Include="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="..\..\samples\publish\*.json" Link="samples\publish\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="..\PoC.Pulsar.TableView.Contracts\Schemas\*.avsc" Link="Schemas\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
+		<ProjectReference Include="..\PoC.Pulsar.TableView.Contracts\PoC.Pulsar.TableView.Contracts.csproj" />
+		<None Include="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+		<None Include="..\..\samples\publish\*.json" Link="samples\publish\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+		<None Include="..\PoC.Pulsar.TableView.Contracts\AvroSchemas\*.avsc" Link="AvroSchemas\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+	</ItemGroup>
 
 </Project>

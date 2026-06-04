@@ -11,9 +11,9 @@
     <PackageReference Include="BenchmarkDotNet" Version="0.15.8" />
   </ItemGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\..\src\PoC.Pulsar.TableView.Processor\PoC.Pulsar.TableView.Processor.csproj" />
-    <None Include="..\..\src\PoC.Pulsar.TableView.Contracts\Schemas\*.avsc" Link="Schemas\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
+	<ItemGroup>
+	    <ProjectReference Include="..\..\src\PoC.Pulsar.TableView.Processor\PoC.Pulsar.TableView.Processor.csproj" />
+	    <None Include="..\..\src\PoC.Pulsar.TableView.Contracts\AvroSchemas\*.avsc" Link="AvroSchemas\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+	</ItemGroup>
 
 </Project>

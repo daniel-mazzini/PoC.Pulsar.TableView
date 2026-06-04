@@ -17,18 +17,6 @@ public class AvroSchemaRegistry
         _schemas.TryAdd(typeof(T), schema);
     }
 
-    //public void RegisterDirectory(string directoryPath)
-    //{
-    //    var files = Directory.GetFiles(directoryPath, "*.avsc");
-    //    foreach (var file in files)
-    //    {
-    //        var json = File.ReadAllText(file);
-    //        var schema = _reader.Read(json);
-    //        var schemaName = Path.GetFileNameWithoutExtension(file);
-    //        _schemas[schemaName] = schema;
-    //    }
-    //}
-
     public AvroSerializer Build()
     {
         return new AvroSerializer(_schemas);

@@ -26,9 +26,9 @@
     <AssemblyAttribute Include="System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverageAttribute" />
   </ItemGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\..\src\PoC.Pulsar.TableView.Contracts\PoC.Pulsar.TableView.Contracts.csproj" />
-    <None Include="..\..\src\PoC.Pulsar.TableView.Contracts\Schemas\*.avsc" Link="Schemas\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\..\src\PoC.Pulsar.TableView.Contracts\PoC.Pulsar.TableView.Contracts.csproj" />
+		<None Include="..\..\src\PoC.Pulsar.TableView.Contracts\AvroSchemas\*.avsc" Link="AvroSchemas\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+	</ItemGroup>
 
 </Project>

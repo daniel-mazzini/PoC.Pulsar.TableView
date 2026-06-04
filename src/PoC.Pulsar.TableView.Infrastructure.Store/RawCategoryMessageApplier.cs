@@ -148,11 +148,11 @@ public sealed class RawCategoryMessageApplier : ITableViewMessageApplier<RawCate
         await PublishRejectedAsync(rejectedMessage, headers, cancellationToken);
     }
 
-    private static (RejectedMessage<RawCategoryMessage> message, Dictionary<string, string> headers) CreateCategoryRejectedWrite(TableViewMessage originalMessage,
-                                                                                                                                 RawCategoryMessage? categoryMessage,
-                                                                                                                                 RejectedReason reason)
+    private static (Rejected<RawCategoryMessage> message, Dictionary<string, string> headers) CreateCategoryRejectedWrite(TableViewMessage originalMessage,
+                                                                                                                           RawCategoryMessage? categoryMessage,
+                                                                                                                           RejectedReason reason)
     {
-        RejectedMessage<RawCategoryMessage> rejectedMessage = categoryMessage is null
+        Rejected<RawCategoryMessage> rejectedMessage = categoryMessage is null
             ? RejectedFactory.CreateFromTombStone<RawCategoryMessage>(originalMessage, reason)
             : RejectedFactory.CreateFromPayload(categoryMessage, originalMessage, reason);
 
@@ -160,7 +160,7 @@ public sealed class RawCategoryMessageApplier : ITableViewMessageApplier<RawCate
         var causationId = HeaderOrDefault(originalMessage, "message-id", originalMessage.BrokerMessageId.ToString());
         var rejectedMessageId = rejectedMessage.RejectedId.ToString("D");
 
-        var headers = CreateRejectedHeaders(nameof(RejectedMessage<RawCategoryMessage>),
+        var headers = CreateRejectedHeaders(nameof(Rejected<RawCategoryMessage>),
                                             "category-rejected",
                                             rejectedMessage.RejectedAt,
                                             correlationId,
@@ -207,7 +207,7 @@ public sealed class RawCategoryMessageApplier : ITableViewMessageApplier<RawCate
         }
     }
 
-    private async Task PublishRejectedAsync(RejectedMessage<RawCategoryMessage> rejectedMessage, Dictionary<string, string> headers, CancellationToken cancellationToken)
+    private async Task PublishRejectedAsync(Rejected<RawCategoryMessage> rejectedMessage, Dictionary<string, string> headers, CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
         var tags = new[]
@@ -226,7 +226,7 @@ public sealed class RawCategoryMessageApplier : ITableViewMessageApplier<RawCate
                                                                    operation: "Publish");
 
         activity?.SetTag("entity_type", "categories-rejected");
-        activity?.SetTag("message_type", nameof(RejectedMessage<RawCategoryMessage>));
+        activity?.SetTag("message_type", nameof(Rejected<RawCategoryMessage>));
         activity?.SetTag("event_type", "category-rejected");
 
         try
@@ -252,12 +252,12 @@ public sealed class RawCategoryMessageApplier : ITableViewMessageApplier<RawCate
     }
 
     private static async Task SaveRejectedAsync(ITableViewUnitOfWork<RawCategoryMessage> uow,
-                                                RejectedMessage<RawCategoryMessage> input,
+                                                Rejected<RawCategoryMessage> input,
                                                 CancellationToken cancellationToken)
         => await uow.RejectedStorage.SaveRejectedRecordAsync(rejectedProjection: new RejectedProjection(input.OriginalMessageKey,
                                                                                                         input.OriginalTopic,
                                                                                                         input.OriginalPartitionId,
-                                                                                                        new RejectedReason(input.Reason.ReasonCode, input.Reason.Reason),
+                                                                                                        input.Reason,
                                                                                                         DateTimeOffset.UtcNow),
                                                               cancellationToken);
 }
