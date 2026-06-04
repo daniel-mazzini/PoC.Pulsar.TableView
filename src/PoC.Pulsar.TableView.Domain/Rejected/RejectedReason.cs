@@ -1,3 +1,6 @@
+using MemoryPack;
+
 namespace PoC.Pulsar.TableView.Domain.Rejected;
 
-public sealed record RejectedReason(string Code, string Description);
+[MemoryPackable]
+public sealed partial record RejectedReason(string Code, string Description);

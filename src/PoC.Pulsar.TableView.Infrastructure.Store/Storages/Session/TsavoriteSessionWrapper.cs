@@ -30,7 +30,7 @@ public class TsavoriteSessionWrapper : ITsavoriteSessionProvider
     public StateSession GetLightSession()
     {
         ThrowIfDisposed();
-        return _lightSession ??= _engine.CreateBasicSession();
+        return _lightSession ??= _engine.CreateLightSession();
     }
     public ClientSession<SpanByte, SpanByte, TInput, TOutput, Empty, TFunctions, StoreFunctions<SpanByte, SpanByte, SpanByteComparer, SpanByteRecordDisposer>, StateAllocator> GetSession<TInput, TOutput, TFunctions>(TFunctions customFunctions = null)
         where TFunctions : SessionFunctionsBase<SpanByte, SpanByte, TInput, TOutput, Empty>

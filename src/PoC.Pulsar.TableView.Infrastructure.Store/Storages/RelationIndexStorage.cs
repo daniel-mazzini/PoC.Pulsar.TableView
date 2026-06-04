@@ -17,7 +17,7 @@ public class RelationIndexStorage : TsavoriteRepositoryBase, IDisposable
         : base(serializer)
     {
         _engine = engine ?? throw new ArgumentNullException(nameof(engine));
-        _session = engine.CreateBasicSession();
+        _session = engine.CreateLightSession();
     }
 
     public async ValueTask<IReadOnlyList<string>> LoadStringRelationAsync(StorageKey key, CancellationToken cancellationToken)

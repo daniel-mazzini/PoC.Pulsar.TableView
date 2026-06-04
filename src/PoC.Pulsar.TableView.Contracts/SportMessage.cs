@@ -1,6 +1,9 @@
+using MemoryPack;
+
 namespace PoC.Pulsar.TableView.Contracts;
 
-public sealed class SportMessage : OfferHierarchyEntity
+[MemoryPackable]
+public sealed partial class SportMessage : OfferHierarchyEntity
 {
     public string SportType { get; init; } = null!;
 }

@@ -17,7 +17,7 @@ public sealed class MetadataStorage : TsavoriteRepositoryBase, IMetadataStorage
         : base(serializer)
     {
         _engine = engine ?? throw new ArgumentNullException(nameof(engine));
-        _session = engine.CreateBasicSession();
+        _session = engine.CreateLightSession();
     }
 
     public async ValueTask<StoreMetadata> EnsureMetadataAsync(CancellationToken cancellationToken)

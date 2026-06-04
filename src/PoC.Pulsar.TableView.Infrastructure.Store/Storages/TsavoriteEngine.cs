@@ -221,10 +221,7 @@ public sealed class TsavoriteEngine : ITsavoriteEngine
         ObjectDisposedException.ThrowIf(_disposed, this);
     }
 
-    public ClientSession<SpanByte, SpanByte, SpanByte, SpanByteAndMemory, Empty, SpanByteFunctions<Empty>, StoreFunctions<SpanByte, SpanByte, SpanByteComparer, SpanByteRecordDisposer>, StateAllocator> CreateBasicSession()
-    {
-        throw new NotImplementedException();
-    }
+    
 
     
 
