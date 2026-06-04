@@ -200,28 +200,34 @@ internal sealed class FakeCheckpointStorage : ICheckpointStorage
 {
     public TopicCheckpoint? LastSaved { get; private set; }
     public List<TopicCheckpoint> SavedCheckpoints { get; } = [];
-    public Dictionary<(string TopicName, int PartitionId), TopicCheckpoint> Checkpoints { get; } = new();
+    public Dictionary<string, TopicCheckpoint> Checkpoints { get; } = new(StringComparer.Ordinal);
     public ViewCheckpoint? LastSavedViewCheckpoint { get; private set; }
     public Dictionary<string, ViewCheckpoint> ViewCheckpoints { get; } = new(StringComparer.Ordinal);
     public string CurrentStoreId { get; set; } = Guid.NewGuid().ToString("D");
 
     public void Seed(TopicCheckpoint checkpoint)
-        => Checkpoints[(checkpoint.TopicName, checkpoint.PartitionId)] = checkpoint;
+        => Checkpoints[checkpoint.PhysicalTopic] = checkpoint;
 
     public void Seed(ViewCheckpoint checkpoint)
         => ViewCheckpoints[checkpoint.ViewName] = checkpoint;
 
-    public Task SaveCheckpointAsync(string topicName, int partitionId, PulsarMessageId lastProcessedMessageId, CancellationToken cancellationToken)
+    public Task SaveCheckpointAsync(TopicShard shard, PulsarMessageId lastProcessedMessageId, CancellationToken cancellationToken)
     {
-        var checkpoint = new TopicCheckpoint(topicName, partitionId, lastProcessedMessageId, Guid.NewGuid(), DateTimeOffset.UtcNow);
+        var checkpoint = new TopicCheckpoint(shard.LogicalTopic,
+                                             shard.PhysicalTopic,
+                                             shard.PartitionId,
+                                             shard.IsPartitioned,
+                                             lastProcessedMessageId,
+                                             Guid.NewGuid(),
+                                             DateTimeOffset.UtcNow);
         LastSaved = checkpoint;
         SavedCheckpoints.Add(checkpoint);
-        Checkpoints[(topicName, partitionId)] = checkpoint;
+        Checkpoints[shard.PhysicalTopic] = checkpoint;
         return Task.CompletedTask;
     }
 
-    public ValueTask<TopicCheckpoint?> GetLastCheckpoint(string topicName, int partitionId, CancellationToken cancellationToken)
-        => ValueTask.FromResult(Checkpoints.TryGetValue((topicName, partitionId), out var checkpoint) ? checkpoint : null);
+    public ValueTask<TopicCheckpoint?> GetLastCheckpoint(TopicShard shard, CancellationToken cancellationToken)
+        => ValueTask.FromResult(Checkpoints.TryGetValue(shard.PhysicalTopic, out var checkpoint) ? checkpoint : null);
 
     public Task SaveViewCheckpointAsync(string viewName, CancellationToken cancellationToken)
     {
@@ -287,28 +293,39 @@ internal sealed class FakeUnitOfWorkFactory : IUnitOfWorkFactory
     public Task MoveDurableAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
 
-internal sealed class FakeProjectorTopicReaderFactory : IProjectorTopicReaderFactory
+internal sealed class FakeProjectorTopicReaderFactory : ITopicShardReaderStrategy
 {
-    private readonly Dictionary<(string TopicName, int PartitionId), Queue<TableViewMessage>> _messages = new();
+    private readonly Dictionary<TopicShard, Queue<TableViewMessage>> _messages = new();
     private readonly Dictionary<string, TopicHighWatermark> _highWatermarks = new(StringComparer.Ordinal);
 
     public MessageId? LastStartMessageId { get; private set; }
 
     public void SeedHighWatermark(string topicName, int partitionId, MessageId messageId)
-        => _highWatermarks[topicName] = new TopicHighWatermark(topicName, new Dictionary<int, MessageId> { [partitionId] = messageId });
+    {
+        var shard = CreateShard(topicName, partitionId);
+        _highWatermarks[topicName] = new TopicHighWatermark(topicName, [new TopicShardHighWatermark(shard, messageId)]);
+    }
 
     public void SeedMessages(string topicName, int partitionId, params TableViewMessage[] messages)
-        => _messages[(topicName, partitionId)] = new Queue<TableViewMessage>(messages);
+        => _messages[CreateShard(topicName, partitionId)] = new Queue<TableViewMessage>(messages);
 
     public Task<TopicHighWatermark> CaptureHighWatermarkAsync(string topicName, CancellationToken cancellationToken)
         => Task.FromResult(_highWatermarks[topicName]);
 
-    public Task<IProjectorTopicReader> CreateReaderAsync(string topicName, int partitionId, MessageId startMessageId, CancellationToken cancellationToken)
+    public Task<IReadOnlyCollection<TopicShard>> DiscoverShardsAsync(string logicalTopic, CancellationToken cancellationToken)
+        => Task.FromResult<IReadOnlyCollection<TopicShard>>(_highWatermarks.TryGetValue(logicalTopic, out var highWatermark)
+            ? highWatermark.Shards
+            : [TopicShard.NonPartitioned(logicalTopic)]);
+
+    public Task<IProjectorTopicReader> CreateReaderAsync(TopicShard shard, MessageId startMessageId, CancellationToken cancellationToken)
     {
         LastStartMessageId = startMessageId;
-        _messages.TryGetValue((topicName, partitionId), out var messages);
+        _messages.TryGetValue(shard, out var messages);
         return Task.FromResult<IProjectorTopicReader>(new FakeProjectorTopicReader(messages ?? new Queue<TableViewMessage>()));
     }
+
+    private static TopicShard CreateShard(string topicName, int partitionId)
+        => partitionId < 0 ? TopicShard.NonPartitioned(topicName) : TopicShard.Partition(topicName, partitionId);
 
     private sealed class FakeProjectorTopicReader : IProjectorTopicReader
     {

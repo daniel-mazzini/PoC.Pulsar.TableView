@@ -49,19 +49,19 @@ public sealed class RawCategoryMessageApplier : ITableViewMessageApplier<RawCate
     {
         if (string.IsNullOrWhiteSpace(input.Key))
         {
-            await unitOfWork.CheckpointStorage.SaveCheckpointAsync(input.TopicName, input.PartitionId, input.BrokerMessageId, cancellationToken);
+            await unitOfWork.CheckpointStorage.SaveCheckpointAsync(input.Shard, input.BrokerMessageId, cancellationToken);
             return new TableMessageNoOp<RawCategoryMessage>(string.Empty, "tombstone_missing_key");
         }
 
         var deletedValue = await unitOfWork.MessageStorage.TryLoadAsync(input.Key, cancellationToken);
         if (deletedValue is null)
         {
-            await unitOfWork.CheckpointStorage.SaveCheckpointAsync(input.TopicName, input.PartitionId, input.BrokerMessageId, cancellationToken);
+            await unitOfWork.CheckpointStorage.SaveCheckpointAsync(input.Shard, input.BrokerMessageId, cancellationToken);
             return new TableMessageNoOp<RawCategoryMessage>(input.Key, "tombstone_missing_entity");
         }
 
         await unitOfWork.MessageStorage.DeleteAsync(input.Key, cancellationToken);
-        await unitOfWork.CheckpointStorage.SaveCheckpointAsync(input.TopicName, input.PartitionId, input.BrokerMessageId, cancellationToken);
+        await unitOfWork.CheckpointStorage.SaveCheckpointAsync(input.Shard, input.BrokerMessageId, cancellationToken);
         return new TableMessageApplied<RawCategoryMessage>(new EventDeleted<RawCategoryMessage>(input.Key, deletedValue));
     }
 
@@ -74,26 +74,26 @@ public sealed class RawCategoryMessageApplier : ITableViewMessageApplier<RawCate
         if (validationError is not null)
         {
             await SaveCategoryAsRejectedAsync(tableViewUnitOfWork, input, message, validationError, cancellationToken);
-            await tableViewUnitOfWork.CheckpointStorage.SaveCheckpointAsync(input.TopicName, input.PartitionId, input.BrokerMessageId, cancellationToken);
+            await tableViewUnitOfWork.CheckpointStorage.SaveCheckpointAsync(input.Shard, input.BrokerMessageId, cancellationToken);
             return new TableMessageRejected<RawCategoryMessage>(message.Id, validationError);
         }
 
         var current = await tableViewUnitOfWork.MessageStorage.TryLoadAsync(message.Id, cancellationToken);
         if (current is not null && message.Version <= current.Version)
         {
-            await tableViewUnitOfWork.CheckpointStorage.SaveCheckpointAsync(input.TopicName, input.PartitionId, input.BrokerMessageId, cancellationToken);
+            await tableViewUnitOfWork.CheckpointStorage.SaveCheckpointAsync(input.Shard, input.BrokerMessageId, cancellationToken);
             return new TableMessageNoOp<RawCategoryMessage>(message.Id, "incoming_version_not_greater_than_current");
         }
 
         if (current is null)
         {
             await tableViewUnitOfWork.MessageStorage.UpsertAsync(message, cancellationToken);
-            await tableViewUnitOfWork.CheckpointStorage.SaveCheckpointAsync(input.TopicName, input.PartitionId, input.BrokerMessageId, cancellationToken);
+            await tableViewUnitOfWork.CheckpointStorage.SaveCheckpointAsync(input.Shard, input.BrokerMessageId, cancellationToken);
             return new TableMessageApplied<RawCategoryMessage>(new TableEntryCreated<RawCategoryMessage>(message.Id, message));
         }
 
         await tableViewUnitOfWork.MessageStorage.UpsertAsync(message, cancellationToken);
-        await tableViewUnitOfWork.CheckpointStorage.SaveCheckpointAsync(input.TopicName, input.PartitionId, input.BrokerMessageId, cancellationToken);
+        await tableViewUnitOfWork.CheckpointStorage.SaveCheckpointAsync(input.Shard, input.BrokerMessageId, cancellationToken);
         return new TableMessageApplied<RawCategoryMessage>(new TableEntryUpdated<RawCategoryMessage>(message.Id, message, current));
     }
 

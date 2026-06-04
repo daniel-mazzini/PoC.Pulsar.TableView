@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using PoC.Pulsar.TableView.Domain.Storages.StateStore;
+using PoC.Pulsar.TableView.Domain.TableView;
 using PoC.Pulsar.TableView.Infrastructure.Store.IntegrationTests.Support;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.IntegrationTests.Storages.Repos;
@@ -27,14 +28,15 @@ public sealed class SportMessageStorageTests
         using var context = new TsavoriteIntegrationContext(nameof(sport_message_storage_should_clear_only_sport_records));
         var sportStorage = context.CreateSportMessageStorage();
         var checkpointStorage = context.CreateCheckpointStorage();
+        var shard = TopicShard.Partition("persistent://public/tableview-inputs/sports", 0);
 
         await sportStorage.UpsertAsync(IntegrationTestData.Sport("sport-1"), CancellationToken.None);
-        await checkpointStorage.SaveCheckpointAsync("persistent://public/tableview-inputs/sports", 0, IntegrationTestData.PulsarMessageId(), CancellationToken.None);
+        await checkpointStorage.SaveCheckpointAsync(shard, IntegrationTestData.PulsarMessageId(), CancellationToken.None);
 
         await sportStorage.ClearAsync(CancellationToken.None);
 
         Assert.Null(await sportStorage.TryLoadAsync("sport-1", CancellationToken.None));
-        Assert.NotNull(await checkpointStorage.GetLastCheckpoint("persistent://public/tableview-inputs/sports", 0, CancellationToken.None));
+        Assert.NotNull(await checkpointStorage.GetLastCheckpoint(shard, CancellationToken.None));
     }
 
     [Fact]

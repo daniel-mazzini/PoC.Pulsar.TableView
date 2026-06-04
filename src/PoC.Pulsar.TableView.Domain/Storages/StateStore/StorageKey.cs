@@ -56,10 +56,10 @@ public readonly record struct StorageKey(string Value)
     internal const string PrefixStoreCategoryByParent = "__geo-projector:idx:category:by-parent:";
 
     public const string SportMessagePrefix = "__geo-projector:raw:sport:";
-    public static StorageKey TopicCheckpoint(string topicName, int partitionId)
+    public static StorageKey TopicCheckpoint(string physicalTopic)
     {
-        string safeTopicName = SanitizeId(topicName);
-        return $"__geo-projector:topic-checkpoint:{safeTopicName}:{partitionId}";
+        string safeTopicName = SanitizeId(physicalTopic);
+        return $"__geo-projector:topic-checkpoint:{safeTopicName}";
     }
 
     public static StorageKey ViewCheckpoint(string viewName)

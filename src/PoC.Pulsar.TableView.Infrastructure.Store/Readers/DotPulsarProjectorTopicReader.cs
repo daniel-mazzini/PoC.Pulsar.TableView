@@ -1,4 +1,4 @@
-﻿using DotPulsar;
+using DotPulsar;
 using DotPulsar.Abstractions;
 using PoC.Pulsar.TableView.Domain.TableView;
 using System.Collections.Generic;
@@ -10,14 +10,12 @@ namespace PoC.Pulsar.TableView.Infrastructure.Store.Readers;
 [ExcludeFromCodeCoverage(Justification = "Integration adapter around a real DotPulsar reader.")]
 internal sealed class DotPulsarProjectorTopicReader : IProjectorTopicReader
 {
-    private readonly string _topicName;
-    private readonly int _partitionId;
     private readonly IReader<byte[]> _reader;
+    private readonly TopicShard _shard;
 
-    public DotPulsarProjectorTopicReader(string topicName, int partitionId, IReader<byte[]> reader)
+    public DotPulsarProjectorTopicReader(TopicShard shard, IReader<byte[]> reader)
     {
-        _topicName = topicName;
-        _partitionId = partitionId;
+        _shard = shard;
         _reader = reader;
     }
 
@@ -27,16 +25,19 @@ internal sealed class DotPulsarProjectorTopicReader : IProjectorTopicReader
 
         if (!message.HasKey)
         {
-            throw new InvalidOperationException($"Received compacted message on topic '{_topicName}' without a key.");
+            throw new InvalidOperationException($"Received compacted message on topic '{_shard.LogicalTopic}' without a key.");
         }
 
-        return new TableViewMessage(_topicName,
-                                    _partitionId,
+        return new TableViewMessage(_shard.LogicalTopic,
+                                    _shard.PartitionId,
                                     message.Key ?? string.Empty,
                                     message.Data,
                                     ToPulsarMessageId(message.MessageId),
-                                    message.Properties);
+                                    message.Properties,
+                                    _shard.PhysicalTopic,
+                                    _shard.IsPartitioned);
     }
+
     private static PulsarMessageId ToPulsarMessageId(MessageId messageId)
     {
         if (TryToPulsarMessageId(messageId, out var pulsarMessageId))
@@ -47,6 +48,7 @@ internal sealed class DotPulsarProjectorTopicReader : IProjectorTopicReader
         throw new InvalidOperationException(
             $"Unsupported Pulsar message id {messageId.LedgerId}:{messageId.EntryId}:{messageId.Partition}.");
     }
+
     private static bool TryToPulsarMessageId(MessageId messageId, out PulsarMessageId pulsarMessageId)
     {
         if (messageId.LedgerId > long.MaxValue || messageId.EntryId > long.MaxValue)
@@ -61,7 +63,7 @@ internal sealed class DotPulsarProjectorTopicReader : IProjectorTopicReader
 
     public ValueTask DisposeAsync() => _reader.DisposeAsync();
 
-    public async IAsyncEnumerable<TableViewMessage> ReadAllAsync([EnumeratorCancellation]CancellationToken stopToken)
+    public async IAsyncEnumerable<TableViewMessage> ReadAllAsync([EnumeratorCancellation] CancellationToken stopToken)
     {
         while (!stopToken.IsCancellationRequested)
         {

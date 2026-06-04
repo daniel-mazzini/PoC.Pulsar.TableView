@@ -745,10 +745,10 @@ public sealed class GeoTaxonomyProcessorTests
         public void Seed(ViewCheckpoint checkpoint)
             => _viewCheckpoints[checkpoint.ViewName] = checkpoint;
 
-        public Task SaveCheckpointAsync(string topicName, int partitionId, PulsarMessageId lastProcessedMessageId, CancellationToken cancellationToken)
+        public Task SaveCheckpointAsync(TopicShard shard, PulsarMessageId lastProcessedMessageId, CancellationToken cancellationToken)
             => Task.CompletedTask;
 
-        public ValueTask<TopicCheckpoint?> GetLastCheckpoint(string topicName, int partitionId, CancellationToken cancellationToken)
+        public ValueTask<TopicCheckpoint?> GetLastCheckpoint(TopicShard shard, CancellationToken cancellationToken)
             => ValueTask.FromResult<TopicCheckpoint?>(null);
 
         public Task SaveViewCheckpointAsync(string viewName, CancellationToken cancellationToken)

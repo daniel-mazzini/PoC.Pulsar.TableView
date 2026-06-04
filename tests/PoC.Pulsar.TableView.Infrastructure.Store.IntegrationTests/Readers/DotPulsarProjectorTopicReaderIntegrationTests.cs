@@ -3,6 +3,7 @@ using DotPulsar.Extensions;
 using Microsoft.Extensions.Logging.Abstractions;
 using PoC.Pulsar.TableView.Contracts;
 using PoC.Pulsar.TableView.Domain.Metadatas;
+using PoC.Pulsar.TableView.Domain.TableView;
 using PoC.Pulsar.TableView.Infrastructure.Store.IntegrationTests.Support;
 using PoC.Pulsar.TableView.Infrastructure.Store.Readers;
 using System.Buffers;
@@ -38,8 +39,8 @@ public sealed class DotPulsarProjectorTopicReaderIntegrationTests
         var highWatermark = await factory.CaptureHighWatermarkAsync(topicName, CancellationToken.None);
 
         Assert.True(highWatermark.HasMessages);
-        Assert.Single(highWatermark.PartitionIds);
-        Assert.Equal(0, highWatermark.PartitionIds.Single());
+        Assert.Single(highWatermark.Shards);
+        Assert.Equal(0, highWatermark.Shards.Single().PartitionId);
     }
 
     [Fact]
@@ -58,7 +59,7 @@ public sealed class DotPulsarProjectorTopicReaderIntegrationTests
         await PublishSportAsync(producer, avroSerializer, expected);
 
         var factory = new DotPulsarProjectorTopicReaderFactory(client, topicNamespace);
-        await using var reader = await factory.CreateReaderAsync(topicName, 0, MessageId.Earliest, CancellationToken.None);
+        await using var reader = await factory.CreateReaderAsync(TopicShard.Partition(topicName, 0), MessageId.Earliest, CancellationToken.None);
         var message = await reader.ReceiveAsync(CancellationToken.None);
         var payload = avroSerializer.Deserialize<SportMessage>(message.Data);
 
@@ -115,7 +116,7 @@ public sealed class DotPulsarProjectorTopicReaderIntegrationTests
         await producer.Send(metadata, payload, CancellationToken.None);
     }
 
-    private sealed class PublishAfterHighWatermarkFactory : IProjectorTopicReaderFactory
+    private sealed class PublishAfterHighWatermarkFactory : ITopicShardReaderStrategy
     {
         private readonly DotPulsarProjectorTopicReaderFactory _innerFactory;
         private readonly IProducer<ReadOnlySequence<byte>> _producer;
@@ -152,7 +153,10 @@ public sealed class DotPulsarProjectorTopicReaderIntegrationTests
             return highWatermark;
         }
 
-        public Task<IProjectorTopicReader> CreateReaderAsync(string topicName, int partitionId, MessageId startMessageId, CancellationToken cancellationToken)
-            => _innerFactory.CreateReaderAsync(topicName, partitionId, startMessageId, cancellationToken);
+        public Task<IReadOnlyCollection<TopicShard>> DiscoverShardsAsync(string logicalTopic, CancellationToken cancellationToken)
+            => _innerFactory.DiscoverShardsAsync(logicalTopic, cancellationToken);
+
+        public Task<IProjectorTopicReader> CreateReaderAsync(TopicShard shard, MessageId startMessageId, CancellationToken cancellationToken)
+            => _innerFactory.CreateReaderAsync(shard, startMessageId, cancellationToken);
     }
 }

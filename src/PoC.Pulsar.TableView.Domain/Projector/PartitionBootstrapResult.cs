@@ -14,3 +14,15 @@ public sealed record PartitionRebuiltFromEarliest<TMessage>(
     int PartitionId)
     : PartitionBootstrapResult<TMessage>(PartitionId);
 
+public abstract record ShardBootstrapResult<TMessage>(
+    TopicShard Shard);
+
+public sealed record ShardRecoveredFromStateStore<TMessage>(
+    TopicShard Shard,
+    IReadOnlyCollection<TableEntryChange<TMessage>> DeltaChanges)
+    : ShardBootstrapResult<TMessage>(Shard);
+
+public sealed record ShardRebuiltFromEarliest<TMessage>(
+    TopicShard Shard)
+    : ShardBootstrapResult<TMessage>(Shard);
+

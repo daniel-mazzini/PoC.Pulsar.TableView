@@ -66,7 +66,7 @@ StoreMetadata metadata = await metadataStorage.EnsureMetadataAsync(CancellationT
 // Unit of Work
 IUnitOfWorkFactory unitOfWorkFactory = new UnitOfWorkFactory(tsavoriteEngine, metadataStorage, serializer);
 
-IProjectorTopicReaderFactory readerFactory = new DotPulsarProjectorTopicReaderFactory(client, options.InputNamespace);
+ITopicShardReaderStrategy readerStrategy = new DotPulsarProjectorTopicReaderFactory(client, options.InputNamespace);
 
 await using var projectorPublisher = new DotPulsarPropertyTaxonomyViewPublisher(client, options.OutputNamespace, avroSerializer);
 await using var rejectedPublisher = new DotPulsarRejectedMessagePublisher(client, options.OutputNamespace, avroSerializer);
@@ -77,7 +77,7 @@ ITableViewMessageApplier<RawCategoryMessage> categoryMessageApplier = new RawCat
 
 var sportsView = new PulsarTableView<SportMessage>(
     BuildTopic(inputNamespace, PulsarTopics.Sports),
-    readerFactory,
+    readerStrategy,
     unitOfWorkFactory,
     avroSerializer,
     projectorMessageApplier,
@@ -86,7 +86,7 @@ var sportsView = new PulsarTableView<SportMessage>(
 
 var categoriesView = new PulsarTableView<RawCategoryMessage>(
     BuildTopic(inputNamespace, PulsarTopics.Categories),
-    readerFactory,
+    readerStrategy,
     unitOfWorkFactory,
     avroSerializer,
     categoryMessageApplier,

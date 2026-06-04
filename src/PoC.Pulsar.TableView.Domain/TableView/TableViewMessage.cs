@@ -7,7 +7,11 @@ public readonly record struct TableViewMessage(string TopicName,
                                                  string? Key,
                                                  ReadOnlySequence<byte> Data,
                                                  PulsarMessageId BrokerMessageId,
-                                                 IReadOnlyDictionary<string, string>? Properties = null)
+                                                 IReadOnlyDictionary<string, string>? Properties = null,
+                                                 string? PhysicalTopicName = null,
+                                                 bool IsPartitioned = false)
 {
     public IReadOnlyDictionary<string, string> Headers { get; init; } = Properties ?? new Dictionary<string, string>(StringComparer.Ordinal);
+    public string PhysicalTopic => PhysicalTopicName ?? TopicName;
+    public TopicShard Shard => new(TopicName, PhysicalTopic, PartitionId, IsPartitioned);
 }

@@ -20,30 +20,36 @@ public class CheckpointStorage : TsavoriteRepositoryBase, ICheckpointStorage
         _sessionProvider = (ITsavoriteSessionProvider)session;
     }
 
-    public async Task SaveCheckpointAsync(string topicName, int partitionId, PulsarMessageId lastProcessedMessageId, CancellationToken cancellationToken)
+    public async Task SaveCheckpointAsync(TopicShard shard, PulsarMessageId lastProcessedMessageId, CancellationToken cancellationToken)
     {
         ThrowIfDisposed();
         var metadata = await _metadataStorage.EnsureMetadataAsync(cancellationToken);
-        var existing = await GetLastCheckpoint(topicName, partitionId, cancellationToken);
+        var existing = await GetLastCheckpoint(shard, cancellationToken);
 
         existing = existing != null
             ? (existing with { LastProcessedMessageId =  lastProcessedMessageId, UpdatedAt = DateTimeOffset.UtcNow, StoreId = metadata.StoreGenerationId })
-            : new TopicCheckpoint(topicName, partitionId, lastProcessedMessageId, metadata.StoreGenerationId, DateTimeOffset.UtcNow);
+            : new TopicCheckpoint(shard.LogicalTopic,
+                                  shard.PhysicalTopic,
+                                  shard.PartitionId,
+                                  shard.IsPartitioned,
+                                  lastProcessedMessageId,
+                                  metadata.StoreGenerationId,
+                                  DateTimeOffset.UtcNow);
 
         var session = _sessionProvider.GetLightSession();
         await UpsertIntoSessionAsync(session,
-                                     StorageKey.TopicCheckpoint(topicName, partitionId),
+                                     StorageKey.TopicCheckpoint(shard.PhysicalTopic),
                                      default,
                                      existing,
                                      cancellationToken);
     }
 
-    public async ValueTask<TopicCheckpoint?> GetLastCheckpoint(string topicName, int partitionId, CancellationToken cancellationToken)
+    public async ValueTask<TopicCheckpoint?> GetLastCheckpoint(TopicShard shard, CancellationToken cancellationToken)
     {
         ThrowIfDisposed();
         var session = _sessionProvider.GetLightSession();
         return await ReadFromSessionAsync<TopicCheckpoint,SpanByte,SpanByteAndMemory,SpanByteFunctions<Empty>>(session,
-                                                                                                                StorageKey.TopicCheckpoint(topicName, partitionId),
+                                                                                                                StorageKey.TopicCheckpoint(shard.PhysicalTopic),
                                                                                                                 cancellationToken);
     }
 

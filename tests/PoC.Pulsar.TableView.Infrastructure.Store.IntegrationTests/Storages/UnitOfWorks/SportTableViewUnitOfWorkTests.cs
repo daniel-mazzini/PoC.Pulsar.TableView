@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using PoC.Pulsar.TableView.Domain.TableView;
 using PoC.Pulsar.TableView.Infrastructure.Store.IntegrationTests.Support;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.IntegrationTests.Storages.UnitOfWorks;
@@ -25,10 +26,11 @@ public sealed class SportTableViewUnitOfWorkTests
         using var context = new TsavoriteIntegrationContext(nameof(unit_of_work_should_read_written_checkpoint_before_commit));
         using var unitOfWork = context.CreateSportUnitOfWork();
         var topic = "persistent://public/tableview-inputs/sports";
+        var shard = TopicShard.Partition(topic, 0);
         var messageId = IntegrationTestData.PulsarMessageId(2, 7);
 
-        await unitOfWork.CheckpointStorage.SaveCheckpointAsync(topic, 0, messageId, CancellationToken.None);
-        var checkpoint = await unitOfWork.CheckpointStorage.GetLastCheckpoint(topic, 0, CancellationToken.None);
+        await unitOfWork.CheckpointStorage.SaveCheckpointAsync(shard, messageId, CancellationToken.None);
+        var checkpoint = await unitOfWork.CheckpointStorage.GetLastCheckpoint(shard, CancellationToken.None);
 
         Assert.NotNull(checkpoint);
         Assert.Equal(messageId, checkpoint.LastProcessedMessageId);
@@ -62,13 +64,14 @@ public sealed class SportTableViewUnitOfWorkTests
         using var storeScope = new TsavoriteStoreScope(nameof(unit_of_work_should_persist_checkpoint_and_message_in_same_commit));
         var serializer = new PoC.Pulsar.TableView.Infrastructure.Store.Serialization.MemoryPackWrapper();
         var topic = "persistent://public/tableview-inputs/sports";
+        var shard = TopicShard.Partition(topic, 0);
         var messageId = IntegrationTestData.PulsarMessageId(3, 10);
 
         using (var engine = new PoC.Pulsar.TableView.Infrastructure.Store.Storages.TsavoriteEngine(storeScope.StorePath))
         using (var unitOfWork = new PoC.Pulsar.TableView.Infrastructure.Store.Storages.UnitOfWorks.SportTableViewUnitOfWork(engine, new PoC.Pulsar.TableView.Infrastructure.Store.Storages.Repos.MetadataStorage(engine, serializer), serializer))
         {
             await unitOfWork.MessageStorage.UpsertAsync(IntegrationTestData.Sport("sport-checkpoint", 2), CancellationToken.None);
-            await unitOfWork.CheckpointStorage.SaveCheckpointAsync(topic, 0, messageId, CancellationToken.None);
+            await unitOfWork.CheckpointStorage.SaveCheckpointAsync(shard, messageId, CancellationToken.None);
             await unitOfWork.CommitAsync(CancellationToken.None);
         }
 
@@ -77,7 +80,7 @@ public sealed class SportTableViewUnitOfWorkTests
         using var reopenedUnitOfWork = new PoC.Pulsar.TableView.Infrastructure.Store.Storages.UnitOfWorks.SportTableViewUnitOfWork(reopenedEngine, reopenedMetadata, serializer);
 
         var loaded = await reopenedUnitOfWork.MessageStorage.TryLoadAsync("sport-checkpoint", CancellationToken.None);
-        var checkpoint = await reopenedUnitOfWork.CheckpointStorage.GetLastCheckpoint(topic, 0, CancellationToken.None);
+        var checkpoint = await reopenedUnitOfWork.CheckpointStorage.GetLastCheckpoint(shard, CancellationToken.None);
 
         Assert.NotNull(loaded);
         Assert.NotNull(checkpoint);

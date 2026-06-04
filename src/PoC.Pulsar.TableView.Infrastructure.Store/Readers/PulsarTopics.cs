@@ -12,4 +12,9 @@ public static class PulsarTopics
     public static string Partition(string topicName, int partitionId) => $"{topicName}-partition-{partitionId}";
 
     public static string Qualify(string topicNamespace, string topicName) => $"persistent://{topicNamespace}/{topicName}";
+
+    public static string QualifyIfNeeded(string topicNamespace, string topicName)
+        => topicName.StartsWith("persistent://", StringComparison.Ordinal) || topicName.StartsWith("non-persistent://", StringComparison.Ordinal)
+            ? topicName
+            : Qualify(topicNamespace, topicName);
 }

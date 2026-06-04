@@ -20,12 +20,13 @@ public sealed class PulsarTableViewTests
         var messageStorage = new FakeSportMessageStorage();
         messageStorage.Seed(Sport("sport-1", version: 1));
         var checkpointStorage = new FakeCheckpointStorage();
-        checkpointStorage.Seed(new TopicCheckpoint(topic, 0, new PulsarMessageId(1, 1, 0, 0), storeMetadata.StoreGenerationId, DateTimeOffset.UtcNow));
+        var shard = TopicShard.Partition(topic, 0);
+        checkpointStorage.Seed(new TopicCheckpoint(shard.LogicalTopic, shard.PhysicalTopic, shard.PartitionId, shard.IsPartitioned, new PulsarMessageId(1, 1, 0, 0), storeMetadata.StoreGenerationId, DateTimeOffset.UtcNow));
         var rejectedStorage = new FakeRejectedStorage();
         var unitOfWork = new FakeSportTableViewUnitOfWork(messageStorage, checkpointStorage, rejectedStorage);
         var unitOfWorkFactory = new FakeUnitOfWorkFactory(unitOfWork);
         var readerFactory = new FakeProjectorTopicReaderFactory();
-        readerFactory.SeedHighWatermark(topic, 0, new MessageId(1, 2, 0, 0, topic));
+        readerFactory.SeedHighWatermark(topic, 0, new MessageId(1, 2, 0, 0, shard.PhysicalTopic));
         readerFactory.SeedMessages(topic,
                                    0,
                                    CreateMessage(topic, 0, Sport("sport-1", version: 2), new PulsarMessageId(1, 2, 0, 0)));
@@ -68,7 +69,7 @@ public sealed class PulsarTableViewTests
         var unitOfWork = new FakeSportTableViewUnitOfWork(messageStorage, checkpointStorage, rejectedStorage);
         var unitOfWorkFactory = new FakeUnitOfWorkFactory(unitOfWork);
         var readerFactory = new FakeProjectorTopicReaderFactory();
-        readerFactory.SeedHighWatermark(topic, 0, new MessageId(1, 2, 0, 0, topic));
+        readerFactory.SeedHighWatermark(topic, 0, new MessageId(1, 2, 0, 0, TopicShard.Partition(topic, 0).PhysicalTopic));
         readerFactory.SeedMessages(topic,
                                    0,
                                    CreateMessage(topic, 0, Sport("sport-2", version: 1), new PulsarMessageId(1, 2, 0, 0)));
@@ -98,6 +99,44 @@ public sealed class PulsarTableViewTests
         Assert.Equal(1, (await view.GetEntry("sport-2", CancellationToken.None))!.Version);
     }
 
+    [Fact]
+    public async Task start_bootstrap_async_should_model_non_partitioned_topic_as_single_physical_shard()
+    {
+        var topic = "persistent://public/default/sports";
+        var storeMetadata = new StoreMetadata(Guid.NewGuid(), SchemaVersion: 1, IsBoostrapCompleted: false, CreatedAt: DateTimeOffset.UtcNow);
+        var messageStorage = new FakeSportMessageStorage();
+        var checkpointStorage = new FakeCheckpointStorage();
+        var rejectedStorage = new FakeRejectedStorage();
+        var unitOfWork = new FakeSportTableViewUnitOfWork(messageStorage, checkpointStorage, rejectedStorage);
+        var unitOfWorkFactory = new FakeUnitOfWorkFactory(unitOfWork);
+        var readerFactory = new FakeProjectorTopicReaderFactory();
+        readerFactory.SeedHighWatermark(topic, -1, new MessageId(1, 2, -1, 0, topic));
+        readerFactory.SeedMessages(topic,
+                                   -1,
+                                   new TableViewMessage(topic,
+                                                        0,
+                                                        "sport-1",
+                                                        new ReadOnlySequence<byte>(JsonSerializer.SerializeToUtf8Bytes(Sport("sport-1", version: 1))),
+                                                        new PulsarMessageId(1, 2, -1, 0),
+                                                        PhysicalTopicName: topic,
+                                                        IsPartitioned: false));
+        var view = new PulsarTableView<SportMessage>(topic,
+                                                      readerFactory,
+                                                      unitOfWorkFactory,
+                                                      new JsonAvroSerializer(),
+                                                      new SportMessageApplier(new FakeRejectedMessagePublisher()),
+                                                      storeMetadata,
+                                                      new TestLogger<PulsarTableView<SportMessage>>());
+
+        await view.StartBootstrapAsync(CancellationToken.None);
+
+        Assert.NotNull(checkpointStorage.LastSaved);
+        Assert.Equal(topic, checkpointStorage.LastSaved!.LogicalTopic);
+        Assert.Equal(topic, checkpointStorage.LastSaved.PhysicalTopic);
+        Assert.Equal(0, checkpointStorage.LastSaved.PartitionId);
+        Assert.False(checkpointStorage.LastSaved.IsPartitioned);
+    }
+
     private static int recoveredDeltaCount(TopicBootstrapResult<SportMessage> result)
         => result is TopicRecoveredFromStateStore<SportMessage> recovered ? recovered.DeltaChanges.Count : 0;
 
@@ -117,5 +156,7 @@ public sealed class PulsarTableViewTests
                partitionId,
                message.Id,
                new ReadOnlySequence<byte>(JsonSerializer.SerializeToUtf8Bytes(message)),
-               messageId);
+               messageId,
+               PhysicalTopicName: partitionId < 0 ? topic : TopicShard.Partition(topic, partitionId).PhysicalTopic,
+               IsPartitioned: partitionId >= 0);
 }
