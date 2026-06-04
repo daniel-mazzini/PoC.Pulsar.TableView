@@ -1,7 +1,7 @@
 ﻿using PoC.Pulsar.TableView.Contracts;
 using PoC.Pulsar.TableView.Domain.Filter;
-using PoC.Pulsar.TableView.Domain.Categories;
 using PoC.Pulsar.TableView.Domain.Serializers;
+using PoC.Pulsar.TableView.Domain.Storages.Entities;
 using PoC.Pulsar.TableView.Domain.Storages.StateStore;
 using PoC.Pulsar.TableView.Infrastructure.Store.Storages.Session;
 using System.Collections.Generic;
@@ -9,7 +9,7 @@ using System.Text;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.Storages.Repos;
 
-public sealed class CategoryMessageStorage : TsavoriteRepositoryBase, ICategoryMessageStorage
+public sealed class CategoryMessageStorage : TsavoriteRepositoryBase, IMessageStorage<string, RawCategoryMessage>, IDisposable
 {
     private readonly ITsavoriteSessionProvider _sessionProvider;
     private bool _disposed;

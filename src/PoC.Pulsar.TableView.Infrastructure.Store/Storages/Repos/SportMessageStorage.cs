@@ -1,7 +1,7 @@
 ﻿using PoC.Pulsar.TableView.Contracts;
 using PoC.Pulsar.TableView.Domain.Filter;
 using PoC.Pulsar.TableView.Domain.Serializers;
-using PoC.Pulsar.TableView.Domain.Sports;
+using PoC.Pulsar.TableView.Domain.Storages.Entities;
 using PoC.Pulsar.TableView.Domain.Storages.StateStore;
 using PoC.Pulsar.TableView.Infrastructure.Store.Storages.Session;
 using System.Collections.Generic;
@@ -9,7 +9,7 @@ using System.Text;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.Storages.Repos;
 
-public sealed class SportMessageStorage : TsavoriteRepositoryBase, ISportMessageStorage
+public sealed class SportMessageStorage : TsavoriteRepositoryBase, IMessageStorage<string, SportMessage>
 {
     private bool _disposed;
     private readonly ITsavoriteSessionProvider _sessionProvider;

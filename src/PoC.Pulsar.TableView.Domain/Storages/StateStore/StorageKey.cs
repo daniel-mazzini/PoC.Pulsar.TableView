@@ -141,24 +141,6 @@ public readonly record struct StorageKey(string Value)
         return $"__geo-projector:metadata:geo-taxonomy:{safeSportId}";
     }
 
-    public static StorageKey CategoryIdsBySport(SportId sportId)
-    {
-        string safeSportId = SanitizeId(sportId.Value);
-        return $"__geo-projector:idx:category-ids:by-sport:{safeSportId}";
-    }
-
-    public static StorageKey OrphanCategoryIdsBySport(SportId sportId)
-    {
-        string safeSportId = SanitizeId(sportId.Value);
-        return $"__geo-projector:missing:category-ids:by-sport:{safeSportId}";
-    }
-
-    public static StorageKey PendingCountByPropertyType(SportId sportId)
-    {
-        string safeSportId = SanitizeId(sportId.Value);
-        return $"__geo-projector:idx:missing-count-category:sport:{safeSportId}";
-    }
-
     public static StorageKey RejectedRecord(string recordId)
     {
         string safeRecordId = SanitizeId(recordId);
