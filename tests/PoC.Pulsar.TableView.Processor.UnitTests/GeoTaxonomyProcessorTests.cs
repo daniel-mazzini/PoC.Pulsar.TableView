@@ -121,6 +121,25 @@ public sealed class GeoTaxonomyProcessorTests
     }
 
     [Fact]
+    public async Task run_async_should_rebuild_with_category_ids_that_require_storage_key_sanitization()
+    {
+        var metadata = new StoreMetadata(Guid.NewGuid(), SchemaVersion: 1, IsBoostrapCompleted: true, CreatedAt: DateTimeOffset.UtcNow);
+        var dependencies = CreateDependencies(metadata);
+        var sports = new FakePulsarTableView<SportMessage>([Sport("sport:live", "Soccer", "SOCCER")], new TopicRecoveredFromStateStore<SportMessage>([]));
+        var categories = new FakePulsarTableView<RawCategoryMessage>([Category("soccer:int", "sport:live", "ES")], new TopicRecoveredFromStateStore<RawCategoryMessage>([]));
+        var publisher = new FakeTaxonomyViewPublisher();
+        var processor = CreateProcessor(sports, categories, publisher, dependencies);
+
+        await using var runner = await ProcessorRunner.StartAsync(processor, sports, categories);
+
+        var published = Assert.Single(publisher.PublishedTaxonomies);
+        Assert.Equal("sport:live", published.SportId);
+        var category = Assert.Single(published.GeoCategories);
+        Assert.Equal("soccer:int", category.CategoryId);
+        Assert.Equal("ES", category.CountryCode);
+    }
+
+    [Fact]
     public async Task run_async_should_generate_single_build_generation_id_per_rebuild()
     {
         var metadata = new StoreMetadata(Guid.NewGuid(), SchemaVersion: 1, IsBoostrapCompleted: true, CreatedAt: DateTimeOffset.UtcNow);

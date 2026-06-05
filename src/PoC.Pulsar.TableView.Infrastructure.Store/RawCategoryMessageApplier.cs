@@ -22,7 +22,7 @@ public sealed class RawCategoryMessageApplier : ITableViewMessageApplier<RawCate
     public async ValueTask<TableMessageApplyResult<RawCategoryMessage>> ApplyAsync(TableViewMessage input,
                                                                                    ProcessPhase processPhase,
                                                                                    ITableViewUnitOfWork<RawCategoryMessage> tableViewUnitOfWork,
-                                                                                   Func<ReadOnlySequence<byte>, RawCategoryMessage> serialize,
+                                                                                   Func<ReadOnlySequence<byte>, RawCategoryMessage> deserialize,
                                                                                    CancellationToken cancellationToken)
     {
         using var activity = ProjectorStoreTelemetry.StartActivity("projection.category.apply",
@@ -35,7 +35,7 @@ public sealed class RawCategoryMessageApplier : ITableViewMessageApplier<RawCate
             return await WhenArriveTombStone(tableViewUnitOfWork, input, cancellationToken);
         }
 
-        var message = serialize(input.Data);
+        var message = deserialize(input.Data);
         activity?.SetTag("entity_type", message.GetType().Name);
 
         var applyResult = await ApplyWithVersionValidationAsync(tableViewUnitOfWork, input, message, cancellationToken);

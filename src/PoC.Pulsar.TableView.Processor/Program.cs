@@ -19,7 +19,7 @@ using PoC.Pulsar.TableView.Processor.Configuration;
 
 var serviceUrl = Environment.GetEnvironmentVariable("PULSAR_SERVICE_URL") ?? "pulsar://127.0.0.1:6650";
 var inputNamespace = Environment.GetEnvironmentVariable("PULSAR_INPUT_NAMESPACE") ?? "public/tableview-inputs";
-
+var outputNamespace = Environment.GetEnvironmentVariable("PULSAR_INPUT_NAMESPACE") ?? "public/tableview-outputs";
 using var loggerFactory = LoggerFactory.Create(builder =>
 {
     builder.AddSimpleConsole(options =>
@@ -52,11 +52,11 @@ loggerFactory.CreateLogger<Program>()
 
 // Message serialization
 AvroSchemaRegistry avroSchemaRegistry = new AvroSchemaRegistry();
-avroSchemaRegistry.Register<SportMessage>("./AvroSchemas/SportMessage.avsc");
-avroSchemaRegistry.Register<RawCategoryMessage>("./AvroSchemas/RawCategoryMessage.avsc");
-avroSchemaRegistry.Register<GeoTaxonomyViewMessage>("./AvroSchemas/GeoTaxonomyViewMessage.avsc");
-avroSchemaRegistry.Register<SportRejectedMessage>("./AvroSchemas/SportRejectedMessage.avsc");
-avroSchemaRegistry.Register<RawCategoryRejectedMessage>("./AvroSchemas/RawCategoryRejectedMessage.avsc");
+avroSchemaRegistry.Register<SportMessage>(BuildSchemaPath("SportMessage.avsc"));
+avroSchemaRegistry.Register<RawCategoryMessage>(BuildSchemaPath("RawCategoryMessage.avsc"));
+avroSchemaRegistry.Register<GeoTaxonomyViewMessage>(BuildSchemaPath("GeoTaxonomyViewMessage.avsc"));
+avroSchemaRegistry.Register<SportRejectedMessage>(BuildSchemaPath("SportRejectedMessage.avsc"));
+avroSchemaRegistry.Register<RawCategoryRejectedMessage>(BuildSchemaPath("RawCategoryRejectedMessage.avsc"));
 var avroSerializer = avroSchemaRegistry.Build();
 
 // Metadata storage
@@ -111,4 +111,9 @@ await processor.RunAsync(cts.Token);
 static string BuildTopic(string @namespace, string topicName)
 {
     return $"persistent://{@namespace}/{topicName}";
+}
+
+static string BuildSchemaPath(string fileName)
+{
+    return Path.Combine(AppContext.BaseDirectory, "AvroSchemas", fileName);
 }

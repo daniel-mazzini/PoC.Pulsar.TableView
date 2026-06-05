@@ -6,6 +6,13 @@ namespace PoC.Pulsar.TableView.Infrastructure.Store.IntegrationTests.Storages.Un
 
 public sealed class SportTableViewUnitOfWorkTests
 {
+    private readonly ITestOutputHelper _output;
+
+    public SportTableViewUnitOfWorkTests(ITestOutputHelper output)
+    {
+        _output = output;
+    }
+
     [Fact]
     public async Task sport_unit_of_work_should_read_written_message_before_commit()
     {
@@ -100,6 +107,7 @@ public sealed class SportTableViewUnitOfWorkTests
             await unitOfWork.MessageStorage.UpsertAsync(IntegrationTestData.Sport($"sport-{index}", index), CancellationToken.None);
         }
         stopwatch.Stop();
+        _output.WriteLine($"write 10_000 pending messages elapsed: {stopwatch.Elapsed}");
 
         var loaded = await unitOfWork.MessageStorage.TryLoadAsync("sport-9999", CancellationToken.None);
 
@@ -127,6 +135,7 @@ public sealed class SportTableViewUnitOfWorkTests
             Assert.NotNull(loaded);
         }
         stopwatch.Stop();
+        _output.WriteLine($"read 10_000 pending messages elapsed: {stopwatch.Elapsed}");
 
         Assert.True(stopwatch.Elapsed <= pending_read_time_threshold, $"Expected pending reads to finish within {pending_read_time_threshold}, but took {stopwatch.Elapsed}.");
     }

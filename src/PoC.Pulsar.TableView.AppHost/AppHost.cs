@@ -24,7 +24,10 @@ bin/pulsar-admin --admin-url http://pulsar:8080 namespaces set-compaction-thresh
 bin/pulsar-admin --admin-url http://pulsar:8080 namespaces set-compaction-threshold --threshold 1M public/tableview-outputs
 bin/pulsar-admin --admin-url http://pulsar:8080 topics create persistent://public/tableview-inputs/sports || true
 bin/pulsar-admin --admin-url http://pulsar:8080 topics create persistent://public/tableview-inputs/categories || true
-bin/pulsar-admin --admin-url http://pulsar:8080 topics create persistent://public/tableview-outputs/taxonomy-view || true
+bin/pulsar-admin --admin-url http://pulsar:8080 topics create persistent://public/tableview-outputs/sport-country-taxonomy-views || true
+bin/pulsar-admin --admin-url http://pulsar:8080 topics create persistent://public/tableview-outputs/sports-rejected || true
+bin/pulsar-admin --admin-url http://pulsar:8080 topics create persistent://public/tableview-outputs/categories-rejected || true
+bin/pulsar-admin --admin-url http://pulsar:8080 topics create persistent://public/tableview-outputs/missing-propertyview-sla || true
 """;
 
 var pulsarInit = builder.AddContainer("pulsar-init", "apachepulsar/pulsar", "3.2.1")

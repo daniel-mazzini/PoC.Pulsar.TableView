@@ -44,16 +44,18 @@ internal sealed class GeoTaxonomyProcessor
     public async Task RunAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("Bootstrapping sports and categories table views.");
-        var sportsBootstrapTask = _sportsTableView.StartBootstrapAsync(cancellationToken);
-        var categoriesBootstrapTask = _categoriesTableView.StartBootstrapAsync(cancellationToken);
-        var viewCheckpointTask = GetViewCheckpointAsync(cancellationToken);
+        //var sportsBootstrapTask = _sportsTableView.StartBootstrapAsync(cancellationToken);
+        //var categoriesBootstrapTask = _categoriesTableView.StartBootstrapAsync(cancellationToken);
+        //var viewCheckpointTask = GetViewCheckpointAsync(cancellationToken);
 
-        await Task.WhenAll(sportsBootstrapTask, categoriesBootstrapTask, viewCheckpointTask);
+        //await Task.WhenAll(sportsBootstrapTask, categoriesBootstrapTask, viewCheckpointTask);
 
-        var sportsBootstrap = sportsBootstrapTask.Result;
-        var categoriesBootstrap = categoriesBootstrapTask.Result;
-        ViewCheckpoint? viewCheckpoint = viewCheckpointTask.Result;
-
+        //var sportsBootstrap = sportsBootstrapTask.Result;
+        //var categoriesBootstrap = categoriesBootstrapTask.Result;
+        //ViewCheckpoint? viewCheckpoint = viewCheckpointTask.Result;
+        var sportsBootstrap = await _sportsTableView.StartBootstrapAsync(cancellationToken);
+        var categoriesBootstrap = await _categoriesTableView.StartBootstrapAsync(cancellationToken);
+        ViewCheckpoint? viewCheckpoint = await GetViewCheckpointAsync(cancellationToken);
 
         bool requiresRebuild = RequiresRebuild(viewCheckpoint, sportsBootstrap, categoriesBootstrap);
         if (requiresRebuild)
