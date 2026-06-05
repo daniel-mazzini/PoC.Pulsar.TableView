@@ -1,5 +1,3 @@
-using Xunit;
-
 namespace PoC.Pulsar.TableView.Infrastructure.Store.IntegrationTests.Support;
 
 [CollectionDefinition(Name)]

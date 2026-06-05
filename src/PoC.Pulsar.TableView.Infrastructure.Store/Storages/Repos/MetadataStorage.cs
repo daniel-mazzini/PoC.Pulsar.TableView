@@ -1,6 +1,4 @@
 ﻿using PoC.Pulsar.TableView.Domain.Metadatas;
-using PoC.Pulsar.TableView.Domain.Serializers;
-using PoC.Pulsar.TableView.Domain.Storages.StateStore;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.Storages.Repos;
 

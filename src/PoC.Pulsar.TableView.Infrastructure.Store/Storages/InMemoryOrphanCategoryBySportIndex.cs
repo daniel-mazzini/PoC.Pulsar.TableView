@@ -2,7 +2,6 @@ using System.Collections.Generic;
 using System.Linq;
 using PoC.Pulsar.TableView.Domain.Categories;
 using PoC.Pulsar.TableView.Domain.Sports;
-using PoC.Pulsar.TableView.Domain.Storages.StateStore;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.Storages;
 

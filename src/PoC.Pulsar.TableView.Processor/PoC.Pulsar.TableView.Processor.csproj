@@ -16,6 +16,10 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<FrameworkReference Include="Microsoft.AspNetCore.App" />
+	</ItemGroup>
+
+	<ItemGroup>
 		<ProjectReference Include="..\PoC.Pulsar.TableView.Contracts\PoC.Pulsar.TableView.Contracts.csproj" />
 		<ProjectReference Include="..\PoC.Pulsar.TableView.Domain\PoC.Pulsar.TableView.Domain.csproj" />
 		<ProjectReference Include="..\PoC.Pulsar.TableView.Infrastructure.Store\PoC.Pulsar.TableView.Infrastructure.Store.csproj" />

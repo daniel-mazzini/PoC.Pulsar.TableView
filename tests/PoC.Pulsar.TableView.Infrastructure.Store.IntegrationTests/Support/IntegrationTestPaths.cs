@@ -1,5 +1,3 @@
-using System.IO;
-
 namespace PoC.Pulsar.TableView.Infrastructure.Store.IntegrationTests.Support;
 
 internal static class IntegrationTestPaths

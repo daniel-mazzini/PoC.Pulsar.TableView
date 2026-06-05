@@ -4,7 +4,6 @@ using DotPulsar.Extensions;
 using Microsoft.IO;
 using PoC.Pulsar.TableView.Contracts;
 using PoC.Pulsar.TableView.Domain.MaterializeViews;
-using PoC.Pulsar.TableView.Domain.Serializers;
 using PoC.Pulsar.TableView.Infrastructure.Store.Observability;
 using PoC.Pulsar.TableView.Infrastructure.Store.Readers;
 using System.Buffers;

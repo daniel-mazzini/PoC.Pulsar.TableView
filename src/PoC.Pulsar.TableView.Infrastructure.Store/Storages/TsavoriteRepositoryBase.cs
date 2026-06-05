@@ -1,6 +1,4 @@
-﻿using PoC.Pulsar.TableView.Domain.Serializers;
-using PoC.Pulsar.TableView.Domain.Storages.StateStore;
-using PoC.Pulsar.TableView.Infrastructure.Store.Observability;
+﻿using PoC.Pulsar.TableView.Infrastructure.Store.Observability;
 using System.Buffers;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.Storages;

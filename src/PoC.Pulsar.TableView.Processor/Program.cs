@@ -1,4 +1,7 @@
 using DotPulsar;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Logging;
 using PoC.Pulsar.TableView.Contracts;
 using PoC.Pulsar.TableView.Domain.Categories;
@@ -8,6 +11,7 @@ using PoC.Pulsar.TableView.Domain.Projector;
 using PoC.Pulsar.TableView.Domain.Serializers;
 using PoC.Pulsar.TableView.Domain.Storages.StateStore;
 using PoC.Pulsar.TableView.Infrastructure.Store;
+using PoC.Pulsar.TableView.Infrastructure.Store.Inspection;
 using PoC.Pulsar.TableView.Infrastructure.Store.Publisher;
 using PoC.Pulsar.TableView.Infrastructure.Store.Readers;
 using PoC.Pulsar.TableView.Infrastructure.Store.Serialization;
@@ -20,6 +24,7 @@ using PoC.Pulsar.TableView.Processor.Configuration;
 var serviceUrl = Environment.GetEnvironmentVariable("PULSAR_SERVICE_URL") ?? "pulsar://127.0.0.1:6650";
 var inputNamespace = Environment.GetEnvironmentVariable("PULSAR_INPUT_NAMESPACE") ?? "public/tableview-inputs";
 var outputNamespace = Environment.GetEnvironmentVariable("PULSAR_INPUT_NAMESPACE") ?? "public/tableview-outputs";
+var tsavoriteViewerOptions = TsavoriteViewerOptions.FromEnvironment();
 using var loggerFactory = LoggerFactory.Create(builder =>
 {
     builder.AddSimpleConsole(options =>
@@ -106,7 +111,31 @@ var processor = new GeoTaxonomyProcessor(sportsView,
                                          metadata,
                                          loggerFactory.CreateLogger<GeoTaxonomyProcessor>());
 
-await processor.RunAsync(cts.Token);
+var programLogger = loggerFactory.CreateLogger<Program>();
+WebApplication? tsavoriteViewerApp = null;
+if (tsavoriteViewerOptions.Enabled)
+{
+    tsavoriteViewerApp = CreateTsavoriteViewerApp(tsavoriteEngine, serializer, tsavoriteViewerOptions.Url);
+    await tsavoriteViewerApp.StartAsync(cts.Token);
+    programLogger.LogInformation("tsavorite viewer listening at {TsavoriteViewerUrl}", tsavoriteViewerOptions.Url);
+}
+else
+{
+    programLogger.LogInformation("tsavorite viewer disabled. Set TSAVORITE_VIEWER_ENABLED=true to enable it.");
+}
+
+try
+{
+    await processor.RunAsync(cts.Token);
+}
+finally
+{
+    if (tsavoriteViewerApp is not null)
+    {
+        await tsavoriteViewerApp.StopAsync(CancellationToken.None);
+        await tsavoriteViewerApp.DisposeAsync();
+    }
+}
 
 static string BuildTopic(string @namespace, string topicName)
 {
@@ -116,4 +145,43 @@ static string BuildTopic(string @namespace, string topicName)
 static string BuildSchemaPath(string fileName)
 {
     return Path.Combine(AppContext.BaseDirectory, "AvroSchemas", fileName);
+}
+
+static WebApplication CreateTsavoriteViewerApp(ITsavoriteEngine engine, IStateSerializer serializer, string url)
+{
+    var builder = WebApplication.CreateSlimBuilder();
+    builder.WebHost.UseUrls(url);
+
+    var app = builder.Build();
+    var viewer = new TsavoriteViewer(engine, serializer);
+
+    app.MapGet("/tsavorite/types", () => Results.Ok(TsavoriteViewer.SupportedTypes()));
+    app.MapGet("/tsavorite/{type}", (string type, int? limit) =>
+    {
+        try
+        {
+            return Results.Ok(viewer.List(type, limit ?? TsavoriteViewer.DefaultLimit));
+        }
+        catch (NotSupportedException exception)
+        {
+            return Results.BadRequest(new { error = exception.Message });
+        }
+    });
+
+    app.MapGet("/tsavorite/{type}/{key}", (string type, string key) =>
+    {
+        try
+        {
+            var entry = viewer.Get(type, key);
+            return entry is null
+                ? Results.NotFound(new { error = $"Tsavorite entry '{type}/{key}' was not found." })
+                : Results.Ok(entry);
+        }
+        catch (NotSupportedException exception)
+        {
+            return Results.BadRequest(new { error = exception.Message });
+        }
+    });
+
+    return app;
 }

@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using PoC.Pulsar.TableView.Domain.Storages.StateStore;
 using PoC.Pulsar.TableView.Domain.TableView;
 using PoC.Pulsar.TableView.Infrastructure.Store.IntegrationTests.Support;
 

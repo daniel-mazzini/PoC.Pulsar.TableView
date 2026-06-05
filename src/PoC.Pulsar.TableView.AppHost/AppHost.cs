@@ -55,7 +55,7 @@ builder.AddExecutable(
     .WaitForCompletion(pulsarInit)
     .WithExplicitStart();
 
-builder.AddExecutable(
+var processor = builder.AddExecutable(
         "processor",
         "dotnet",
         repositoryRoot,
@@ -64,7 +64,26 @@ builder.AddExecutable(
         "src/PoC.Pulsar.TableView.Processor/PoC.Pulsar.TableView.Processor.csproj")
     .WithEnvironment("PULSAR_SERVICE_URL", "pulsar://127.0.0.1:6650")
     .WithEnvironment("PULSAR_INPUT_NAMESPACE", "public/tableview-inputs")
+    .WithEnvironment("TSAVORITE_VIEWER_ENABLED", "true")
+    .WithEnvironment("TSAVORITE_VIEWER_URL", "http://127.0.0.1:18080")
     .WaitForCompletion(pulsarInit)
+    .WithExplicitStart();
+
+builder.AddExecutable(
+        "cli-tsavorite",
+        "dotnet",
+        repositoryRoot,
+        "run",
+        "--project",
+        "src/PoC.Pulsar.TableView.Cli/PoC.Pulsar.TableView.Cli.csproj",
+        "--",
+        "tsavorite",
+        "list",
+        "sports",
+        "--watch",
+        "20s")
+    .WithEnvironment("TsavoriteViewer__BaseUrl", "http://127.0.0.1:18080")
+    .WaitFor(processor)
     .WithExplicitStart();
 
 builder.Build().Run();

@@ -1,8 +1,6 @@
 ﻿using PoC.Pulsar.TableView.Contracts;
 using PoC.Pulsar.TableView.Domain.Filter;
-using PoC.Pulsar.TableView.Domain.Serializers;
 using PoC.Pulsar.TableView.Domain.Storages.Entities;
-using PoC.Pulsar.TableView.Domain.Storages.StateStore;
 using PoC.Pulsar.TableView.Infrastructure.Store.Storages.Session;
 using System.Collections.Generic;
 using System.Text;

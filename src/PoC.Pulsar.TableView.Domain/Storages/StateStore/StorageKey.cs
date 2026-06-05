@@ -128,6 +128,7 @@ public readonly record struct StorageKey(string Value)
     }
 
     public static StorageKey CategoryMessagePrefix => "__geo-projector:raw:category:";
+    public const string RejectedRecordPrefix = "__geo-projector:rejected:";
 
     public static StorageKey CountryTaxonomyMaterializedView(SportId sportId)
     {
@@ -144,7 +145,7 @@ public readonly record struct StorageKey(string Value)
     public static StorageKey RejectedRecord(string recordId)
     {
         string safeRecordId = SanitizeId(recordId);
-        return $"__geo-projector:rejected:{safeRecordId}";
+        return $"{RejectedRecordPrefix}{safeRecordId}";
     }
 
     #endregion

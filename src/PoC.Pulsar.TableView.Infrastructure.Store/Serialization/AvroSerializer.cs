@@ -1,6 +1,5 @@
 using Chr.Avro.Abstract;
 using Chr.Avro.Serialization;
-using PoC.Pulsar.TableView.Domain.Serializers;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Collections.Immutable;

@@ -1,6 +1,4 @@
 ﻿using PoC.Pulsar.TableView.Domain.Rejected;
-using PoC.Pulsar.TableView.Domain.Serializers;
-using PoC.Pulsar.TableView.Domain.Storages.StateStore;
 using PoC.Pulsar.TableView.Infrastructure.Store.Storages.Session;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.Storages.Repos;

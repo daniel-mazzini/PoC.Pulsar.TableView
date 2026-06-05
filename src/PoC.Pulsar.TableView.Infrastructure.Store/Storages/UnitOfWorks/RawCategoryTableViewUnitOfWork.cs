@@ -2,9 +2,7 @@ using PoC.Pulsar.TableView.Contracts;
 using PoC.Pulsar.TableView.Domain.Checkpoints;
 using PoC.Pulsar.TableView.Domain.Metadatas;
 using PoC.Pulsar.TableView.Domain.Rejected;
-using PoC.Pulsar.TableView.Domain.Serializers;
 using PoC.Pulsar.TableView.Domain.Storages.Entities;
-using PoC.Pulsar.TableView.Domain.Storages.StateStore;
 using PoC.Pulsar.TableView.Infrastructure.Store.Storages.Repos;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.Storages.UnitOfWorks;

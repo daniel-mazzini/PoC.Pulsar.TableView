@@ -1,5 +1,4 @@
-﻿using PoC.Pulsar.TableView.Domain.Storages.StateStore;
-using PoC.Pulsar.TableView.Infrastructure.Store.Storages.Session;
+﻿using PoC.Pulsar.TableView.Infrastructure.Store.Storages.Session;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.Storages.UnitOfWorks;
 
