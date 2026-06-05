@@ -64,6 +64,7 @@ var processor = builder.AddExecutable(
         "src/PoC.Pulsar.TableView.Processor/PoC.Pulsar.TableView.Processor.csproj")
     .WithEnvironment("PULSAR_SERVICE_URL", "pulsar://127.0.0.1:6650")
     .WithEnvironment("PULSAR_INPUT_NAMESPACE", "public/tableview-inputs")
+    .WithEnvironment("PULSAR_OUTPUT_NAMESPACE", "public/tableview-outputs")
     .WithEnvironment("TSAVORITE_VIEWER_ENABLED", "true")
     .WithEnvironment("TSAVORITE_VIEWER_URL", "http://127.0.0.1:18080")
     .WaitForCompletion(pulsarInit)

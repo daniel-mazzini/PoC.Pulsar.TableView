@@ -1,38 +1,32 @@
-using DotPulsar;
+using System.Diagnostics;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using PoC.Pulsar.TableView.Contracts;
-using PoC.Pulsar.TableView.Domain.Categories;
-using PoC.Pulsar.TableView.Domain.MaterializeViews;
-using PoC.Pulsar.TableView.Domain.Metadatas;
-using PoC.Pulsar.TableView.Domain.Projector;
+using OpenTelemetry;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 using PoC.Pulsar.TableView.Domain.Serializers;
-using PoC.Pulsar.TableView.Domain.Storages.StateStore;
-using PoC.Pulsar.TableView.Infrastructure.Store;
 using PoC.Pulsar.TableView.Infrastructure.Store.Inspection;
-using PoC.Pulsar.TableView.Infrastructure.Store.Publisher;
-using PoC.Pulsar.TableView.Infrastructure.Store.Readers;
-using PoC.Pulsar.TableView.Infrastructure.Store.Serialization;
+using PoC.Pulsar.TableView.Infrastructure.Store.Observability;
 using PoC.Pulsar.TableView.Infrastructure.Store.Storages;
-using PoC.Pulsar.TableView.Infrastructure.Store.Storages.Repos;
-using PoC.Pulsar.TableView.Infrastructure.Store.Storages.UnitOfWorks;
 using PoC.Pulsar.TableView.Processor;
 using PoC.Pulsar.TableView.Processor.Configuration;
 
-var serviceUrl = Environment.GetEnvironmentVariable("PULSAR_SERVICE_URL") ?? "pulsar://127.0.0.1:6650";
-var inputNamespace = Environment.GetEnvironmentVariable("PULSAR_INPUT_NAMESPACE") ?? "public/tableview-inputs";
-var outputNamespace = Environment.GetEnvironmentVariable("PULSAR_INPUT_NAMESPACE") ?? "public/tableview-outputs";
+var options = ProjectorOptions.FromEnvironment();
 var tsavoriteViewerOptions = TsavoriteViewerOptions.FromEnvironment();
-using var loggerFactory = LoggerFactory.Create(builder =>
+using var tracerProvider = CreateTracerProvider();
+using var meterProvider = CreateMeterProvider();
+var services = new ServiceCollection()
+    .AddProcessorLogging()
+    .AddProcessorServices(options);
+    
+await using var serviceProvider = services.BuildServiceProvider(new ServiceProviderOptions
 {
-    builder.AddSimpleConsole(options =>
-        {
-            options.SingleLine = true;
-            options.TimestampFormat = "HH:mm:ss ";
-        })
-        .SetMinimumLevel(LogLevel.Information);
+    ValidateOnBuild = true,
+    ValidateScopes = true
 });
 
 using var cts = new CancellationTokenSource();
@@ -43,75 +37,12 @@ Console.CancelKeyPress += (_, args) =>
     cts.Cancel();
 };
 
-var options = new ProjectorOptions();
+var programLogger = serviceProvider.GetRequiredService<ILogger<Program>>();
+var tsavoriteEngine = serviceProvider.GetRequiredService<ITsavoriteEngine>();
+var serializer = serviceProvider.GetRequiredService<IStateSerializer>();
+var processor = serviceProvider.GetRequiredService<GeoTaxonomyProcessor>();
+programLogger.LogInformation("store initialized at path {StorePath}", options.StorePath);
 
-await using var client = PulsarClient.Builder()
-    .ServiceUrl(new Uri(options.ServiceUrl, UriKind.Absolute))
-    .Build();
-
-// State serializar (used when save in store)
-IStateSerializer serializer = new MemoryPackWrapper();
-ITsavoriteEngine tsavoriteEngine = new TsavoriteEngine(options.StorePath);
-loggerFactory.CreateLogger<Program>()
-            .LogInformation("store initialized at path {StorePath}", options.StorePath);
-
-// Message serialization
-AvroSchemaRegistry avroSchemaRegistry = new AvroSchemaRegistry();
-avroSchemaRegistry.Register<SportMessage>(BuildSchemaPath("SportMessage.avsc"));
-avroSchemaRegistry.Register<RawCategoryMessage>(BuildSchemaPath("RawCategoryMessage.avsc"));
-avroSchemaRegistry.Register<GeoTaxonomyViewMessage>(BuildSchemaPath("GeoTaxonomyViewMessage.avsc"));
-avroSchemaRegistry.Register<SportRejectedMessage>(BuildSchemaPath("SportRejectedMessage.avsc"));
-avroSchemaRegistry.Register<RawCategoryRejectedMessage>(BuildSchemaPath("RawCategoryRejectedMessage.avsc"));
-var avroSerializer = avroSchemaRegistry.Build();
-
-// Metadata storage
-IMetadataStorage metadataStorage = new MetadataStorage(tsavoriteEngine, serializer);
-StoreMetadata metadata = await metadataStorage.EnsureMetadataAsync(CancellationToken.None);
-
-// Unit of Work
-IUnitOfWorkFactory unitOfWorkFactory = new UnitOfWorkFactory(tsavoriteEngine, metadataStorage, serializer);
-
-ITopicShardReaderStrategy readerStrategy = new DotPulsarProjectorTopicReaderFactory(client, options.InputNamespace);
-
-await using var projectorPublisher = new DotPulsarPropertyTaxonomyViewPublisher(client, options.OutputNamespace, avroSerializer);
-await using var rejectedPublisher = new DotPulsarRejectedMessagePublisher(client, options.OutputNamespace, avroSerializer);
-
-
-ITableViewMessageApplier<SportMessage> projectorMessageApplier = new SportMessageApplier(rejectedPublisher);
-ITableViewMessageApplier<RawCategoryMessage> categoryMessageApplier = new RawCategoryMessageApplier(rejectedPublisher);
-
-var sportsView = new PulsarTableView<SportMessage>(
-    BuildTopic(inputNamespace, PulsarTopics.Sports),
-    readerStrategy,
-    unitOfWorkFactory,
-    avroSerializer,
-    projectorMessageApplier,
-    metadata,
-    loggerFactory.CreateLogger<PulsarTableView<SportMessage>>());
-
-var categoriesView = new PulsarTableView<RawCategoryMessage>(
-    BuildTopic(inputNamespace, PulsarTopics.Categories),
-    readerStrategy,
-    unitOfWorkFactory,
-    avroSerializer,
-    categoryMessageApplier,
-    metadata,
-    loggerFactory.CreateLogger<PulsarTableView<RawCategoryMessage>>());
-
-ICategoryRelationIndex categoryBySportIndex = new InMemoryCategoryBySportIndex();
-ICategoryPendingIndex orphanCategoryBySportIndex = new InMemoryOrphanCategoryBySportIndex();
-IGeoTaxonomyViewStorage taxonomyViewStorage = new InMemoryGeoTaxonomyViewStorage();
-var processor = new GeoTaxonomyProcessor(sportsView,
-                                         categoriesView,
-                                         projectorPublisher,
-                                         categoryBySportIndex,
-                                         orphanCategoryBySportIndex,
-                                         taxonomyViewStorage,
-                                         unitOfWorkFactory,
-                                         metadata,
-                                         loggerFactory.CreateLogger<GeoTaxonomyProcessor>());
-
-var programLogger = loggerFactory.CreateLogger<Program>();
 WebApplication? tsavoriteViewerApp = null;
 if (tsavoriteViewerOptions.Enabled)
 {
@@ -124,9 +55,35 @@ else
     programLogger.LogInformation("tsavorite viewer disabled. Set TSAVORITE_VIEWER_ENABLED=true to enable it.");
 }
 
+using var processorActivity = ProjectorStoreTelemetry.StartActivity("processor.run",
+                                                                    operation: "GeoTaxonomyProcessor.RunAsync");
+processorActivity?.SetTag("pulsar.service_url", options.ServiceUrl);
+processorActivity?.SetTag("pulsar.input_namespace", options.InputNamespace);
+processorActivity?.SetTag("pulsar.output_namespace", options.OutputNamespace);
+processorActivity?.SetTag("store.path", options.StorePath);
+processorActivity?.SetTag("tsavorite.viewer.enabled", tsavoriteViewerOptions.Enabled);
+programLogger.LogInformation("processor starting with Pulsar service {ServiceUrl}, input namespace {InputNamespace}, output namespace {OutputNamespace}",
+                             options.ServiceUrl,
+                             options.InputNamespace,
+                             options.OutputNamespace);
+
 try
 {
     await processor.RunAsync(cts.Token);
+    processorActivity?.SetTag("result", cts.IsCancellationRequested ? "cancelled" : "completed");
+    programLogger.LogInformation("processor stopped.");
+}
+catch (OperationCanceledException) when (cts.IsCancellationRequested)
+{
+    processorActivity?.SetTag("result", "cancelled");
+    programLogger.LogInformation("processor cancellation requested.");
+}
+catch (Exception exception)
+{
+    processorActivity?.SetTag("result", "error");
+    processorActivity?.SetStatus(ActivityStatusCode.Error, exception.GetType().Name);
+    programLogger.LogError(exception, "processor failed.");
+    throw;
 }
 finally
 {
@@ -137,15 +94,42 @@ finally
     }
 }
 
-static string BuildTopic(string @namespace, string topicName)
+static TracerProvider CreateTracerProvider()
 {
-    return $"persistent://{@namespace}/{topicName}";
+    var builder = Sdk.CreateTracerProviderBuilder()
+                     .SetResourceBuilder(CreateResourceBuilder())
+                     .AddSource(ProjectorStoreTelemetry.Name);
+
+    if (HasOtlpEndpoint())
+    {
+        builder.AddOtlpExporter();
+    }
+
+    return builder.Build();
 }
 
-static string BuildSchemaPath(string fileName)
+static MeterProvider CreateMeterProvider()
 {
-    return Path.Combine(AppContext.BaseDirectory, "AvroSchemas", fileName);
+    var builder = Sdk.CreateMeterProviderBuilder()
+                     .SetResourceBuilder(CreateResourceBuilder())
+                     .AddMeter(ProjectorStoreTelemetry.Name);
+
+    if (HasOtlpEndpoint())
+    {
+        builder.AddOtlpExporter();
+    }
+
+    return builder.Build();
 }
+
+static ResourceBuilder CreateResourceBuilder()
+    => ResourceBuilder.CreateDefault()
+                      .AddService("poc-pulsar-tableview-processor");
+
+static bool HasOtlpEndpoint()
+    => !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT"))
+       || !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"))
+       || !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"));
 
 static WebApplication CreateTsavoriteViewerApp(ITsavoriteEngine engine, IStateSerializer serializer, string url)
 {

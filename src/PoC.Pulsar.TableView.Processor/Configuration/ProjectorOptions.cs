@@ -11,4 +11,13 @@ internal sealed record ProjectorOptions
     public string InputNamespace { get; init; } = DefaultInputNamespace;
     public string OutputNamespace { get; init; } = DefaultOutputNamespace;
     public string StorePath { get; init; } = DefaultStorePath;
+
+    public static ProjectorOptions FromEnvironment()
+        => new()
+        {
+            ServiceUrl = Environment.GetEnvironmentVariable("PULSAR_SERVICE_URL") ?? DefaultServiceUrl,
+            InputNamespace = Environment.GetEnvironmentVariable("PULSAR_INPUT_NAMESPACE") ?? DefaultInputNamespace,
+            OutputNamespace = Environment.GetEnvironmentVariable("PULSAR_OUTPUT_NAMESPACE") ?? DefaultOutputNamespace,
+            StorePath = Environment.GetEnvironmentVariable("PROJECTOR_STORE_PATH") ?? DefaultStorePath
+        };
 }
