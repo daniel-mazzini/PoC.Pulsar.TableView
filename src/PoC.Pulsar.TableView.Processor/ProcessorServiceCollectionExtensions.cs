@@ -17,6 +17,7 @@ using PoC.Pulsar.TableView.Infrastructure.Store.Readers;
 using PoC.Pulsar.TableView.Infrastructure.Store.Serialization;
 using PoC.Pulsar.TableView.Infrastructure.Store.Storages;
 using PoC.Pulsar.TableView.Infrastructure.Store.Storages.Repos;
+using PoC.Pulsar.TableView.Infrastructure.Store.Storages.Session;
 using PoC.Pulsar.TableView.Infrastructure.Store.Storages.UnitOfWorks;
 using PoC.Pulsar.TableView.Processor.Configuration;
 
@@ -34,6 +35,7 @@ internal static class ProcessorServiceCollectionExtensions
 
         services.AddSingleton<IStateSerializer, MemoryPackWrapper>();
         services.AddSingleton<ITsavoriteEngine>(sp => new TsavoriteEngine(sp.GetRequiredService<ProjectorOptions>().StorePath));
+        services.AddSingleton<IStateSession>(sp => new TsavoriteSessionWrapper(sp.GetRequiredService<ITsavoriteEngine>()));
         services.AddSingleton<IMetadataStorage, MetadataStorage>();
         services.AddSingleton(sp => sp.GetRequiredService<IMetadataStorage>()
                                       .EnsureMetadataAsync(CancellationToken.None)
@@ -76,7 +78,7 @@ internal static class ProcessorServiceCollectionExtensions
                 sp.GetRequiredService<StoreMetadata>(),
                 sp.GetRequiredService<ILogger<PulsarTableView<RawCategoryMessage>>>()));
 
-        services.AddSingleton<ICategoryRelationIndex, InMemoryCategoryBySportIndex>();
+        services.AddSingleton<ICategoryRelationIndex, TsavoriteCategoryRelationIndex>();
         services.AddSingleton<ICategoryPendingIndex, InMemoryOrphanCategoryBySportIndex>();
         services.AddSingleton<IGeoTaxonomyViewStorage, InMemoryGeoTaxonomyViewStorage>();
         services.AddSingleton<GeoTaxonomyProcessor>();

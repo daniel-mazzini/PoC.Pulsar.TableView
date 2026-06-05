@@ -24,6 +24,14 @@ public sealed class TsavoriteViewer
                                  StorageKey.CategoryMessagePrefix.Value,
                                  key => StorageKey.CategoryMessage(key).Value,
                                  typeof(RawCategoryMessage)),
+            ["category-by-sport"] = new("category-by-sport",
+                                        StorageKey.CategoryBySportIndexPrefix,
+                                        key => key,
+                                        typeof(string)),
+            ["category-by-parent"] = new("category-by-parent",
+                                         StorageKey.CategoryByParentIndexPrefix,
+                                         key => key,
+                                         typeof(string)),
             ["rejected"] = new("rejected",
                                StorageKey.RejectedRecordPrefix,
                                key => StorageKey.RejectedRecord(key).Value,
@@ -121,6 +129,7 @@ public sealed class TsavoriteViewer
     private object? Deserialize(TsavoriteViewerType type, ReadOnlySpan<byte> valueSpan)
         => type.ValueType == typeof(SportMessage) ? _serializer.Deserialize<SportMessage>(valueSpan) :
            type.ValueType == typeof(RawCategoryMessage) ? _serializer.Deserialize<RawCategoryMessage>(valueSpan) :
+           type.ValueType == typeof(string) ? _serializer.Deserialize<string>(valueSpan) :
            type.ValueType == typeof(RejectedProjection) ? _serializer.Deserialize<RejectedProjection>(valueSpan) :
            type.ValueType == typeof(StoreMetadata) ? _serializer.Deserialize<StoreMetadata>(valueSpan) :
            throw new NotSupportedException($"Unsupported Tsavorite viewer CLR type '{type.ValueType.FullName}'.");

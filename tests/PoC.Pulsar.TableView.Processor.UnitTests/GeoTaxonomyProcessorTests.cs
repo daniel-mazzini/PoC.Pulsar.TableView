@@ -50,6 +50,7 @@ public sealed class GeoTaxonomyProcessorTests
         Assert.Equal("category-taxonomy", savedCheckpoint.ViewName);
         Assert.Equal(metadata.StoreGenerationId.ToString("D"), savedCheckpoint.StoreId);
         Assert.Single(publisher.PublishedTaxonomies);
+        Assert.Equal(1, dependencies.UnitOfWorkFactory.BuildUnitOfWorkCommitCount);
     }
 
     [Fact]
@@ -351,14 +352,18 @@ public sealed class GeoTaxonomyProcessorTests
             CurrentStoreId = storeMetadata.StoreGenerationId.ToString("D")
         };
         var operationLog = new List<string>();
+        var relationIndex = new TrackingCategoryBySportIndex();
+        var pendingIndex = new TrackingOrphanCategoryBySportIndex();
+        var viewStorage = new TrackingGeoTaxonomyViewStorage(operationLog);
+        var unitOfWorkFactory = new FakeUnitOfWorkFactory(checkpointStorage, relationIndex, pendingIndex, viewStorage);
 
         return new ProcessorDependencies(storeMetadata,
                                          checkpointStorage,
-                                         new TrackingCategoryBySportIndex(),
-                                         new TrackingOrphanCategoryBySportIndex(),
-                                         new TrackingGeoTaxonomyViewStorage(operationLog),
+                                         relationIndex,
+                                         pendingIndex,
+                                         viewStorage,
                                          operationLog,
-                                         new FakeUnitOfWorkFactory(checkpointStorage));
+                                         unitOfWorkFactory);
     }
 
     private static SportMessage Sport(string id, string name, string sportType)
@@ -785,15 +790,56 @@ public sealed class GeoTaxonomyProcessorTests
     private sealed class FakeUnitOfWorkFactory : IUnitOfWorkFactory
     {
         private readonly FakeCheckpointStorage _checkpointStorage;
+        private readonly TrackingCategoryBySportIndex _relationIndex;
+        private readonly TrackingOrphanCategoryBySportIndex _pendingIndex;
+        private readonly TrackingGeoTaxonomyViewStorage _viewStorage;
 
-        public FakeUnitOfWorkFactory(FakeCheckpointStorage checkpointStorage)
-            => _checkpointStorage = checkpointStorage;
+        public FakeUnitOfWorkFactory(FakeCheckpointStorage checkpointStorage,
+                                     TrackingCategoryBySportIndex relationIndex,
+                                     TrackingOrphanCategoryBySportIndex pendingIndex,
+                                     TrackingGeoTaxonomyViewStorage viewStorage)
+            => (_checkpointStorage, _relationIndex, _pendingIndex, _viewStorage)
+                = (checkpointStorage, relationIndex, pendingIndex, viewStorage);
+
+        public int BuildUnitOfWorkCommitCount { get; private set; }
 
         public ITableViewUnitOfWork<TMessage> CreateBootstrap<TMessage>()
             => new FakeTableViewUnitOfWork<TMessage>(_checkpointStorage);
 
+        public IGeoTaxonomyBuildUnitOfWork CreateGeoTaxonomyBuild()
+            => new FakeGeoTaxonomyBuildUnitOfWork(_relationIndex,
+                                                  _pendingIndex,
+                                                  _viewStorage,
+                                                  () => BuildUnitOfWorkCommitCount++);
+
         public Task MoveDurableAsync(CancellationToken cancellationToken)
             => Task.CompletedTask;
+    }
+
+    private sealed class FakeGeoTaxonomyBuildUnitOfWork : IGeoTaxonomyBuildUnitOfWork
+    {
+        private readonly Action _onCommit;
+
+        public FakeGeoTaxonomyBuildUnitOfWork(ICategoryRelationIndex relationIndex,
+                                              ICategoryPendingIndex pendingIndex,
+                                              IGeoTaxonomyViewStorage materializeViewStorage,
+                                              Action onCommit)
+            => (CategoryRelationIndex, CategoryPendingIndex, MaterializeViewStorage, _onCommit)
+                = (relationIndex, pendingIndex, materializeViewStorage, onCommit);
+
+        public ICategoryRelationIndex CategoryRelationIndex { get; }
+        public ICategoryPendingIndex CategoryPendingIndex { get; }
+        public IGeoTaxonomyViewStorage MaterializeViewStorage { get; }
+
+        public Task CommitAsync(CancellationToken ct)
+        {
+            _onCommit();
+            return Task.CompletedTask;
+        }
+
+        public void Dispose()
+        {
+        }
     }
 
     private sealed class FakeTableViewUnitOfWork<TMessage> : ITableViewUnitOfWork<TMessage>

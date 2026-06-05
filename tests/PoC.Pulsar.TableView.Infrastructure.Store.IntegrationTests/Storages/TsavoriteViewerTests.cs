@@ -58,6 +58,40 @@ public sealed class TsavoriteViewerTests
     }
 
     [Fact]
+    public async Task list_should_scan_category_relations_by_sport_and_deserialize_real_ids()
+    {
+        using var context = new TsavoriteIntegrationContext(nameof(list_should_scan_category_relations_by_sport_and_deserialize_real_ids));
+        using var index = context.CreateCategoryRelationIndex();
+        var sportId = new PoC.Pulsar.TableView.Domain.Sports.SportId("sport:live");
+
+        await index.IndexCategoryAsync(new PoC.Pulsar.TableView.Domain.Categories.CategoryRelations(new PoC.Pulsar.TableView.Domain.Categories.CategoryId("soccer:int"), sportId, null), CancellationToken.None);
+
+        var viewer = new TsavoriteViewer(context.Engine, context.StateSerializer);
+        var entry = Assert.Single(viewer.List("category-by-sport", limit: 100));
+
+        Assert.StartsWith(StorageKey.CategoryBySportIndexPrefix, entry.StorageKey);
+        Assert.Equal("category-by-sport", entry.Type);
+        Assert.Equal("soccer:int", Assert.IsType<string>(entry.Value));
+    }
+
+    [Fact]
+    public async Task list_should_scan_category_relations_by_parent_and_deserialize_real_ids()
+    {
+        using var context = new TsavoriteIntegrationContext(nameof(list_should_scan_category_relations_by_parent_and_deserialize_real_ids));
+        using var index = context.CreateCategoryRelationIndex();
+        var parentId = new PoC.Pulsar.TableView.Domain.Categories.CategoryId("parent:int");
+
+        await index.IndexCategoryAsync(new PoC.Pulsar.TableView.Domain.Categories.CategoryRelations(new PoC.Pulsar.TableView.Domain.Categories.CategoryId("child:int"), new PoC.Pulsar.TableView.Domain.Sports.SportId("sport:live"), parentId), CancellationToken.None);
+
+        var viewer = new TsavoriteViewer(context.Engine, context.StateSerializer);
+        var entry = Assert.Single(viewer.List("category-by-parent", limit: 100));
+
+        Assert.StartsWith(StorageKey.CategoryByParentIndexPrefix, entry.StorageKey);
+        Assert.Equal("category-by-parent", entry.Type);
+        Assert.Equal("child:int", Assert.IsType<string>(entry.Value));
+    }
+
+    [Fact]
     public async Task list_should_deserialize_rejected_records()
     {
         using var context = new TsavoriteIntegrationContext(nameof(list_should_deserialize_rejected_records));

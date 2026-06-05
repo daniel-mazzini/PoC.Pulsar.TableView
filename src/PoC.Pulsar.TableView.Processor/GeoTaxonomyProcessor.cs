@@ -103,6 +103,7 @@ internal sealed class GeoTaxonomyProcessor
     private async Task BuildAsync(IDictionary<string, SportMessage> sports, IDictionary<string, RawCategoryMessage> categories, CancellationToken cancellationToken)
     {
         var buildGenerationId = CreateBuildGenerationId();
+        using var unitOfWork = _unitOfWorkFactory.CreateGeoTaxonomyBuild();
 
         foreach (var category in categories.Values)
         {
@@ -110,27 +111,29 @@ internal sealed class GeoTaxonomyProcessor
                                                   new SportId(category.SportId),
                                                   GetParentCategoryId(category.ParentId));
 
-            await _relationIndex.IndexCategoryAsync(relations, cancellationToken);
+            await unitOfWork.CategoryRelationIndex.IndexCategoryAsync(relations, cancellationToken);
 
             if (!sports.ContainsKey(category.SportId))
             {
-                await _pendingIndex.TryMarkCategoryWaitingForSportAsync(relations.SportId,
-                                                                        relations.CategoryId,
-                                                                        // in this process, we dont use the doble check because we have all the categories and we are not listen for new ones until the build is finished
-                                                                        // so we are sure that if the sport is not in the list we can avoid an extra read to the index
-                                                                        (sportId, ct) => ValueTask.FromResult(false),
-                                                                        cancellationToken);
+                await unitOfWork.CategoryPendingIndex.TryMarkCategoryWaitingForSportAsync(relations.SportId,
+                                                                                  relations.CategoryId,
+                                                                                  // in this process, we dont use the doble check because we have all the categories and we are not listen for new ones until the build is finished
+                                                                                  // so we are sure that if the sport is not in the list we can avoid an extra read to the index
+                                                                                  (sportId, ct) => ValueTask.FromResult(false),
+                                                                                  cancellationToken);
             }
         }
 
         foreach (var sport in sports.Values)
         {
             var sportId = new SportId(sport.Id);
-            var categoryIds = await _relationIndex.GetCategoriesBySportAsync(sportId, cancellationToken);
+            var categoryIds = await unitOfWork.CategoryRelationIndex.GetCategoriesBySportAsync(sportId, cancellationToken);
             var sportCategories = await FilterCategoriesForGeoViewAsync(categoryIds, categories, cancellationToken);
             var candidateView = GeoTaxonomyViewMessage.Create(sport, sportCategories, version: 0);
-            await SaveAndPublishViewAsync(sportId, candidateView, buildGenerationId, cancellationToken);
+            await SaveAndPublishViewAsync(unitOfWork.MaterializeViewStorage, sportId, candidateView, buildGenerationId, cancellationToken);
         }
+
+        await unitOfWork.CommitAsync(cancellationToken);
     }
 
     private static string ToJson<T>(T value) => JsonSerializer.Serialize(value, new JsonSerializerOptions { WriteIndented = true });
@@ -435,8 +438,17 @@ internal sealed class GeoTaxonomyProcessor
                                                string buildGenerationId,
                                                CancellationToken cancellationToken)
     {
-        var result = await _materializeViewStorage.UpsertViewAsync(sportId, candidateView, buildGenerationId, cancellationToken);
+        await SaveAndPublishViewAsync(_materializeViewStorage, sportId, candidateView, buildGenerationId, cancellationToken);
+    }
+
+    private async Task SaveAndPublishViewAsync(IGeoTaxonomyViewStorage viewStorage,
+                                               SportId sportId,
+                                               GeoTaxonomyViewMessage candidateView,
+                                               string buildGenerationId,
+                                               CancellationToken cancellationToken)
+    {
+        var result = await viewStorage.UpsertViewAsync(sportId, candidateView, buildGenerationId, cancellationToken);
         await _taxonomyPublisher.PublishAsync(result.View, cancellationToken);
-        await _materializeViewStorage.MarkViewPublishedAsync(sportId, result.CalculatedVersion, buildGenerationId, cancellationToken);
+        await viewStorage.MarkViewPublishedAsync(sportId, result.CalculatedVersion, buildGenerationId, cancellationToken);
     }
 }

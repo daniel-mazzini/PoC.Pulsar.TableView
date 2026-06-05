@@ -1,5 +1,7 @@
 ﻿using System.Collections.Generic;
 using PoC.Pulsar.TableView.Contracts;
+using PoC.Pulsar.TableView.Domain.Categories;
+using PoC.Pulsar.TableView.Domain.MaterializeViews;
 using PoC.Pulsar.TableView.Domain.Metadatas;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.Storages.UnitOfWorks;
@@ -9,13 +11,21 @@ public class UnitOfWorkFactory : IUnitOfWorkFactory
     private readonly ITsavoriteEngine _engine;
     private readonly IMetadataStorage _metadataStorage;
     private readonly IStateSerializer _stateSerializer;
+    private readonly ICategoryPendingIndex _pendingIndex;
+    private readonly IGeoTaxonomyViewStorage _materializeViewStorage;
     private readonly IReadOnlyDictionary<Type, Func<object>> _bootstrapFactories;
 
-    public UnitOfWorkFactory(ITsavoriteEngine engine, IMetadataStorage metadataStorage, IStateSerializer stateSerializer)
+    public UnitOfWorkFactory(ITsavoriteEngine engine,
+                             IMetadataStorage metadataStorage,
+                             IStateSerializer stateSerializer,
+                             ICategoryPendingIndex pendingIndex,
+                             IGeoTaxonomyViewStorage materializeViewStorage)
     {
         _engine = engine;
         this._metadataStorage = metadataStorage;
         _stateSerializer = stateSerializer;
+        _pendingIndex = pendingIndex;
+        _materializeViewStorage = materializeViewStorage;
 
         _bootstrapFactories = new Dictionary<Type, Func<object>>
         {
@@ -33,6 +43,9 @@ public class UnitOfWorkFactory : IUnitOfWorkFactory
 
         return (ITableViewUnitOfWork<TMessage>)factory();
     }
+
+    public IGeoTaxonomyBuildUnitOfWork CreateGeoTaxonomyBuild()
+        => new GeoTaxonomyBuildUnitOfWork(_engine, _stateSerializer, _pendingIndex, _materializeViewStorage);
 
     public async Task MoveDurableAsync(CancellationToken cancellationToken)
     {

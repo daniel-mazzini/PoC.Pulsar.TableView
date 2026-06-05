@@ -48,12 +48,14 @@ public readonly record struct StorageKey(string Value)
         });
     }
 
+    private static string EncodeSegment(string value) => Uri.EscapeDataString(value);
+
     #region keyFactory
 
     public const string StoreMetadata = "__geo-projector:store-metadata";
     public const string StoreDiagnostics = "__geo-projector:store-diagnostics";
-    internal const string PrefixStoreCategoryBySport = "__geo-projector:idx:category:by-sport:";
-    internal const string PrefixStoreCategoryByParent = "__geo-projector:idx:category:by-parent:";
+    public const string CategoryBySportIndexPrefix = "__geo-projector:idx:category:by-sport:";
+    public const string CategoryByParentIndexPrefix = "__geo-projector:idx:category:by-parent:";
 
     public const string SportMessagePrefix = "__geo-projector:raw:sport:";
     public static StorageKey TopicCheckpoint(string physicalTopic)
@@ -71,26 +73,26 @@ public readonly record struct StorageKey(string Value)
     
     public static StorageKey CategoryBySportPrefix(SportId sportId)
     {
-        string safeSportId = SanitizeId(sportId.Value);
-        return $"{PrefixStoreCategoryBySport}{safeSportId}:category:";
+        string encodedSportId = EncodeSegment(sportId.Value);
+        return $"{CategoryBySportIndexPrefix}{encodedSportId}:category:";
     }
 
     public static StorageKey CategoryBySport(SportId sportId, CategoryId categoryId)
     {
-        string safeCategoryId = SanitizeId(categoryId.Value);
-        return $"{CategoryBySportPrefix(sportId).Value}{safeCategoryId}";
+        string encodedCategoryId = EncodeSegment(categoryId.Value);
+        return $"{CategoryBySportPrefix(sportId).Value}{encodedCategoryId}";
     }
 
     public static StorageKey CategoryByParentPrefix(CategoryId parentCategoryId)
     {
-        string safeParentCategoryId = SanitizeId(parentCategoryId.Value);
-        return $"{PrefixStoreCategoryByParent}{safeParentCategoryId}:category:";
+        string encodedParentCategoryId = EncodeSegment(parentCategoryId.Value);
+        return $"{CategoryByParentIndexPrefix}{encodedParentCategoryId}:category:";
     }
 
     public static StorageKey CategoryByParent(CategoryId parentCategoryId, CategoryId categoryId)
     {
-        string safeCategoryId = SanitizeId(categoryId.Value);
-        return $"{CategoryByParentPrefix(parentCategoryId).Value}{safeCategoryId}";
+        string encodedCategoryId = EncodeSegment(categoryId.Value);
+        return $"{CategoryByParentPrefix(parentCategoryId).Value}{encodedCategoryId}";
     }
     public static StorageKey OrphanCategoryBySportPrefix(SportId sportId)
     {

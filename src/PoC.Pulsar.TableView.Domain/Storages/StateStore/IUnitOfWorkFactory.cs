@@ -5,6 +5,8 @@ public interface IUnitOfWorkFactory
 {
     ITableViewUnitOfWork<TMessage> CreateBootstrap<TMessage>();
 
+    IGeoTaxonomyBuildUnitOfWork CreateGeoTaxonomyBuild();
+
     Task MoveDurableAsync(CancellationToken cancellationToken);
 }
 

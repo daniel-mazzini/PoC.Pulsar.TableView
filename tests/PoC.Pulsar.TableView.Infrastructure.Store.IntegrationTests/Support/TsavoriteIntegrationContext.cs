@@ -2,6 +2,7 @@ using PoC.Pulsar.TableView.Domain.Serializers;
 using PoC.Pulsar.TableView.Infrastructure.Store.Serialization;
 using PoC.Pulsar.TableView.Infrastructure.Store.Storages;
 using PoC.Pulsar.TableView.Infrastructure.Store.Storages.Repos;
+using PoC.Pulsar.TableView.Infrastructure.Store.Storages.Session;
 using PoC.Pulsar.TableView.Infrastructure.Store.Storages.UnitOfWorks;
 using System.Text;
 
@@ -10,6 +11,7 @@ namespace PoC.Pulsar.TableView.Infrastructure.Store.IntegrationTests.Support;
 internal sealed class TsavoriteIntegrationContext : IDisposable
 {
     private readonly TsavoriteStoreScope _storeScope;
+    private readonly List<IDisposable> _ownedSessions = [];
 
     public TsavoriteIntegrationContext(string testName)
     {
@@ -17,12 +19,18 @@ internal sealed class TsavoriteIntegrationContext : IDisposable
         StateSerializer = new MemoryPackWrapper();
         Engine = new TsavoriteEngine(_storeScope.StorePath);
         MetadataStorage = new MetadataStorage(Engine, StateSerializer);
-        UnitOfWorkFactory = new UnitOfWorkFactory(Engine, MetadataStorage, StateSerializer);
+        UnitOfWorkFactory = new UnitOfWorkFactory(Engine,
+                                                 MetadataStorage,
+                                                 StateSerializer,
+                                                 new InMemoryOrphanCategoryBySportIndex(),
+                                                 new InMemoryGeoTaxonomyViewStorage());
     }
 
     public ITsavoriteEngine Engine { get; }
 
     public IStateSerializer StateSerializer { get; }
+
+    public string StorePath => _storeScope.StorePath;
 
     public MetadataStorage MetadataStorage { get; }
 
@@ -45,6 +53,13 @@ internal sealed class TsavoriteIntegrationContext : IDisposable
 
     public RejectedStorage CreateRejectedStorage()
         => new(new PoC.Pulsar.TableView.Infrastructure.Store.Storages.Session.TsavoriteSessionWrapper(Engine), StateSerializer);
+
+    public TsavoriteCategoryRelationIndex CreateCategoryRelationIndex()
+    {
+        var session = new TsavoriteSessionWrapper(Engine);
+        _ownedSessions.Add(session);
+        return new TsavoriteCategoryRelationIndex(session, StateSerializer);
+    }
 
     public T? ReadSingleByPrefix<T>(string prefix)
     {
@@ -70,6 +85,11 @@ internal sealed class TsavoriteIntegrationContext : IDisposable
 
     public void Dispose()
     {
+        foreach (var session in _ownedSessions)
+        {
+            session.Dispose();
+        }
+
         MetadataStorage.Dispose();
         Engine.Dispose();
         _storeScope.Dispose();

@@ -1,14 +1,18 @@
 using DotPulsar;
 using Microsoft.Extensions.Logging;
 using PoC.Pulsar.TableView.Contracts;
+using PoC.Pulsar.TableView.Domain.Categories;
 using PoC.Pulsar.TableView.Domain.Checkpoints;
 using PoC.Pulsar.TableView.Domain.Filter;
+using PoC.Pulsar.TableView.Domain.MaterializeViews;
 using PoC.Pulsar.TableView.Domain.Rejected;
+using PoC.Pulsar.TableView.Domain.Sports;
 using PoC.Pulsar.TableView.Domain.Serializers;
 using PoC.Pulsar.TableView.Domain.Storages.Entities;
 using PoC.Pulsar.TableView.Domain.Storages.StateStore;
 using PoC.Pulsar.TableView.Domain.TableView;
 using PoC.Pulsar.TableView.Infrastructure.Store.Readers;
+using PoC.Pulsar.TableView.Infrastructure.Store.Storages;
 using System.Buffers;
 using System.Text.Json;
 
@@ -290,7 +294,23 @@ internal sealed class FakeUnitOfWorkFactory : IUnitOfWorkFactory
         return (ITableViewUnitOfWork<TMessage>)(object)_unitOfWork;
     }
 
+    public IGeoTaxonomyBuildUnitOfWork CreateGeoTaxonomyBuild()
+        => new NoOpGeoTaxonomyBuildUnitOfWork();
+
     public Task MoveDurableAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+internal sealed class NoOpGeoTaxonomyBuildUnitOfWork : IGeoTaxonomyBuildUnitOfWork
+{
+    public ICategoryRelationIndex CategoryRelationIndex { get; } = new InMemoryCategoryBySportIndex();
+    public ICategoryPendingIndex CategoryPendingIndex { get; } = new InMemoryOrphanCategoryBySportIndex();
+    public IGeoTaxonomyViewStorage MaterializeViewStorage { get; } = new InMemoryGeoTaxonomyViewStorage();
+
+    public Task CommitAsync(CancellationToken ct) => Task.CompletedTask;
+
+    public void Dispose()
+    {
+    }
 }
 
 internal sealed class FakeProjectorTopicReaderFactory : ITopicShardReaderStrategy
