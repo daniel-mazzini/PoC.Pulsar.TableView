@@ -22,7 +22,6 @@ internal sealed class TsavoriteIntegrationContext : IDisposable
         UnitOfWorkFactory = new UnitOfWorkFactory(Engine,
                                                  MetadataStorage,
                                                  StateSerializer,
-                                                 new InMemoryOrphanCategoryBySportIndex(),
                                                  new InMemoryGeoTaxonomyViewStorage());
     }
 
@@ -59,6 +58,13 @@ internal sealed class TsavoriteIntegrationContext : IDisposable
         var session = new TsavoriteSessionWrapper(Engine);
         _ownedSessions.Add(session);
         return new TsavoriteCategoryRelationIndex(session, StateSerializer);
+    }
+
+    public TsavoriteCategoryPendingIndex CreateCategoryPendingIndex()
+    {
+        var session = new TsavoriteSessionWrapper(Engine);
+        _ownedSessions.Add(session);
+        return new TsavoriteCategoryPendingIndex(session, StateSerializer);
     }
 
     public T? ReadSingleByPrefix<T>(string prefix)

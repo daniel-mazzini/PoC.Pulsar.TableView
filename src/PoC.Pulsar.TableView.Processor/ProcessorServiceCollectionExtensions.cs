@@ -3,7 +3,6 @@ using DotPulsar.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using PoC.Pulsar.TableView.Contracts;
-using PoC.Pulsar.TableView.Domain.Categories;
 using PoC.Pulsar.TableView.Domain.MaterializeViews;
 using PoC.Pulsar.TableView.Domain.Metadatas;
 using PoC.Pulsar.TableView.Domain.Projector;
@@ -78,8 +77,6 @@ internal static class ProcessorServiceCollectionExtensions
                 sp.GetRequiredService<StoreMetadata>(),
                 sp.GetRequiredService<ILogger<PulsarTableView<RawCategoryMessage>>>()));
 
-        services.AddSingleton<ICategoryRelationIndex, TsavoriteCategoryRelationIndex>();
-        services.AddSingleton<ICategoryPendingIndex, InMemoryOrphanCategoryBySportIndex>();
         services.AddSingleton<IGeoTaxonomyViewStorage, InMemoryGeoTaxonomyViewStorage>();
         services.AddSingleton<GeoTaxonomyProcessor>();
 

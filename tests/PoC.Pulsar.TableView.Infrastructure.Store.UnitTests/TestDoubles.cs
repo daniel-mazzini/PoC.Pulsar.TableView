@@ -305,6 +305,7 @@ internal sealed class NoOpGeoTaxonomyBuildUnitOfWork : IGeoTaxonomyBuildUnitOfWo
     public ICategoryRelationIndex CategoryRelationIndex { get; } = new InMemoryCategoryBySportIndex();
     public ICategoryPendingIndex CategoryPendingIndex { get; } = new InMemoryOrphanCategoryBySportIndex();
     public IGeoTaxonomyViewStorage MaterializeViewStorage { get; } = new InMemoryGeoTaxonomyViewStorage();
+    public ICheckpointStorage CheckpointStorage { get; } = new FakeCheckpointStorage();
 
     public Task CommitAsync(CancellationToken ct) => Task.CompletedTask;
 

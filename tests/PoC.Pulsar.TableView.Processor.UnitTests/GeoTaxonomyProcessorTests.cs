@@ -337,9 +337,6 @@ public sealed class GeoTaxonomyProcessorTests
             sports,
             categories,
             publisher,
-            dependencies.RelationIndex,
-            dependencies.PendingIndex,
-            dependencies.ViewStorage,
             dependencies.UnitOfWorkFactory,
             dependencies.StoreMetadata,
             NullLogger<GeoTaxonomyProcessor>.Instance);
@@ -810,6 +807,7 @@ public sealed class GeoTaxonomyProcessorTests
             => new FakeGeoTaxonomyBuildUnitOfWork(_relationIndex,
                                                   _pendingIndex,
                                                   _viewStorage,
+                                                  _checkpointStorage,
                                                   () => BuildUnitOfWorkCommitCount++);
 
         public Task MoveDurableAsync(CancellationToken cancellationToken)
@@ -823,13 +821,15 @@ public sealed class GeoTaxonomyProcessorTests
         public FakeGeoTaxonomyBuildUnitOfWork(ICategoryRelationIndex relationIndex,
                                               ICategoryPendingIndex pendingIndex,
                                               IGeoTaxonomyViewStorage materializeViewStorage,
+                                              ICheckpointStorage checkpointStorage,
                                               Action onCommit)
-            => (CategoryRelationIndex, CategoryPendingIndex, MaterializeViewStorage, _onCommit)
-                = (relationIndex, pendingIndex, materializeViewStorage, onCommit);
+            => (CategoryRelationIndex, CategoryPendingIndex, MaterializeViewStorage, CheckpointStorage, _onCommit)
+                = (relationIndex, pendingIndex, materializeViewStorage, checkpointStorage, onCommit);
 
         public ICategoryRelationIndex CategoryRelationIndex { get; }
         public ICategoryPendingIndex CategoryPendingIndex { get; }
         public IGeoTaxonomyViewStorage MaterializeViewStorage { get; }
+        public ICheckpointStorage CheckpointStorage { get; }
 
         public Task CommitAsync(CancellationToken ct)
         {

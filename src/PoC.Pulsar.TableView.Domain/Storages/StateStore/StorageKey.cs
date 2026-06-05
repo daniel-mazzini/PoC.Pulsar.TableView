@@ -19,35 +19,6 @@ public readonly record struct StorageKey(string Value)
 
     public override string ToString() => Value;
 
-    /// <summary>
-    /// Replace ':' characters with '-' efficiently with span.
-    /// </summary>
-    private static string SanitizeId(string id)
-    {
-        if (string.IsNullOrEmpty(id)) return id;
-
-        ReadOnlySpan<char> idSpan = id.AsSpan();
-
-        int colonIndex = idSpan.IndexOf(':');
-
-        if (colonIndex == -1)
-        {
-            return id;
-        }
-
-        return string.Create(id.Length, id, (destinationSpan, originalId) =>
-        {
-            ReadOnlySpan<char> sourceSpan = originalId.AsSpan();
-
-            for (int i = 0; i < sourceSpan.Length; i++)
-            {
-                char c = sourceSpan[i];
-                // Reemplazamos en caliente mientras escribimos el string definitivo
-                destinationSpan[i] = (c == ':') ? '-' : c;
-            }
-        });
-    }
-
     private static string EncodeSegment(string value) => Uri.EscapeDataString(value);
 
     #region keyFactory
@@ -56,18 +27,20 @@ public readonly record struct StorageKey(string Value)
     public const string StoreDiagnostics = "__geo-projector:store-diagnostics";
     public const string CategoryBySportIndexPrefix = "__geo-projector:idx:category:by-sport:";
     public const string CategoryByParentIndexPrefix = "__geo-projector:idx:category:by-parent:";
+    public const string OrphanCategoryBySportIndexPrefix = "__geo-projector:missing:category:by-sport:";
+    public const string OrphanSportByCategoryIndexPrefix = "__geo-projector:missing:sport:by-category:";
 
     public const string SportMessagePrefix = "__geo-projector:raw:sport:";
     public static StorageKey TopicCheckpoint(string physicalTopic)
     {
-        string safeTopicName = SanitizeId(physicalTopic);
-        return $"__geo-projector:topic-checkpoint:{safeTopicName}";
+        string encodedTopicName = EncodeSegment(physicalTopic);
+        return $"__geo-projector:topic-checkpoint:{encodedTopicName}";
     }
 
     public static StorageKey ViewCheckpoint(string viewName)
     {
-        string safeViewName = SanitizeId(viewName);
-        return $"__geo-projector:view-checkpoint:{safeViewName}";
+        string encodedViewName = EncodeSegment(viewName);
+        return $"__geo-projector:view-checkpoint:{encodedViewName}";
     }
 
     
@@ -96,37 +69,37 @@ public readonly record struct StorageKey(string Value)
     }
     public static StorageKey OrphanCategoryBySportPrefix(SportId sportId)
     {
-        string safeSportId = SanitizeId(sportId.Value);
-        return $"__geo-projector:missing:category:by-sport:{safeSportId}:category:";
+        string encodedSportId = EncodeSegment(sportId.Value);
+        return $"{OrphanCategoryBySportIndexPrefix}{encodedSportId}:category:";
     }
     public static StorageKey OrphanCategoryBySport(SportId sportId, CategoryId categoryId)
     {
-        string safeCategoryId = SanitizeId(categoryId.Value);
-        return $"{OrphanCategoryBySportPrefix(sportId).Value}{safeCategoryId}";
+        string encodedCategoryId = EncodeSegment(categoryId.Value);
+        return $"{OrphanCategoryBySportPrefix(sportId).Value}{encodedCategoryId}";
     }
     public static StorageKey SportMessage(string sportId)
     {
-        string safeSportId = SanitizeId(sportId);
-        return $"{SportMessagePrefix}{safeSportId}";
+        string encodedSportId = EncodeSegment(sportId);
+        return $"{SportMessagePrefix}{encodedSportId}";
     }
 
     public static StorageKey OrphanSportByCategoryPrefix(CategoryId categoryId)
     {
-        string safeCategoryId = SanitizeId(categoryId.Value);
-        return $"__geo-projector:missing:sport:by-category:{safeCategoryId}:sport:";
+        string encodedCategoryId = EncodeSegment(categoryId.Value);
+        return $"{OrphanSportByCategoryIndexPrefix}{encodedCategoryId}:sport:";
     }
 
     public static StorageKey OrphanSportByCategory(CategoryId categoryId, SportId sportId)
     {
-        string safeSportId = SanitizeId(sportId.Value);
-        return $"{OrphanSportByCategoryPrefix(categoryId).Value}{safeSportId}";
+        string encodedSportId = EncodeSegment(sportId.Value);
+        return $"{OrphanSportByCategoryPrefix(categoryId).Value}{encodedSportId}";
     }
 
 
     public static StorageKey CategoryMessage(string categoryId)
     {
-        string safeCategoryId = SanitizeId(categoryId);
-        return $"__geo-projector:raw:category:{safeCategoryId}";
+        string encodedCategoryId = EncodeSegment(categoryId);
+        return $"__geo-projector:raw:category:{encodedCategoryId}";
     }
 
     public static StorageKey CategoryMessagePrefix => "__geo-projector:raw:category:";
@@ -134,20 +107,20 @@ public readonly record struct StorageKey(string Value)
 
     public static StorageKey CountryTaxonomyMaterializedView(SportId sportId)
     {
-        string safeSportId = SanitizeId(sportId.Value);
-        return $"__geo-projector:mv:country-taxonomy:{safeSportId}";
+        string encodedSportId = EncodeSegment(sportId.Value);
+        return $"__geo-projector:mv:country-taxonomy:{encodedSportId}";
     }
 
     public static StorageKey GeoTaxonomyViewMetadata(SportId sportId)
     {
-        string safeSportId = SanitizeId(sportId.Value);
-        return $"__geo-projector:metadata:geo-taxonomy:{safeSportId}";
+        string encodedSportId = EncodeSegment(sportId.Value);
+        return $"__geo-projector:metadata:geo-taxonomy:{encodedSportId}";
     }
 
     public static StorageKey RejectedRecord(string recordId)
     {
-        string safeRecordId = SanitizeId(recordId);
-        return $"{RejectedRecordPrefix}{safeRecordId}";
+        string encodedRecordId = EncodeSegment(recordId);
+        return $"{RejectedRecordPrefix}{encodedRecordId}";
     }
 
     #endregion
