@@ -30,8 +30,8 @@ internal sealed class CompactTopicCommandRunner : ICompactTopicCommandRunner
         {
             "sports" => BuildTopic(_options.InputNamespace, "sports"),
             "categories" => BuildTopic(_options.InputNamespace, "categories"),
-            "taxonomy-view" => BuildTopic(_options.OutputNamespace, "taxonomy-view"),
-            _ => throw new InvalidOperationException("The compact-topic command only supports sports, categories, and taxonomy-view.")
+            "sport-country-taxonomy-views" => BuildTopic(_options.OutputNamespace, "sport-country-taxonomy-views"),
+            _ => throw new InvalidOperationException("The compact-topic command only supports sports, categories, and sport-country-taxonomy-views.")
         };
     }
 

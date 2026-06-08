@@ -88,7 +88,7 @@ builder.AddExecutable(
     .WithExplicitStart();
 
 builder.AddExecutable(
-        "cli-compact-taxonomy-view",
+        "cli-compact-sport-country-taxonomy-views",
         "dotnet",
         repositoryRoot,
         "run",
@@ -96,7 +96,7 @@ builder.AddExecutable(
         "src/PoC.Pulsar.TableView.Cli/PoC.Pulsar.TableView.Cli.csproj",
         "--",
         "compact-topic",
-        "taxonomy-view")
+        "sport-country-taxonomy-views")
     .WithEnvironment("Pulsar__AdminUrl", "http://127.0.0.1:8080")
     .WithEnvironment("Pulsar__InputNamespace", "public/tableview-inputs")
     .WithEnvironment("Pulsar__OutputNamespace", "public/tableview-outputs")

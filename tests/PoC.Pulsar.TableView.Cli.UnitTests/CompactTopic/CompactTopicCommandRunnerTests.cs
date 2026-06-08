@@ -12,7 +12,7 @@ public sealed class CompactTopicCommandRunnerTests
     [Theory]
     [InlineData("sports", "persistent://public/input/sports")]
     [InlineData("categories", "persistent://public/input/categories")]
-    [InlineData("taxonomy-view", "persistent://public/output/taxonomy-view")]
+    [InlineData("sport-country-taxonomy-views", "persistent://public/output/sport-country-taxonomy-views")]
     public async Task run_async_should_trigger_supported_topic_compaction(string topic, string expectedTopic)
     {
         var adminClient = new FakePulsarAdminClient();
