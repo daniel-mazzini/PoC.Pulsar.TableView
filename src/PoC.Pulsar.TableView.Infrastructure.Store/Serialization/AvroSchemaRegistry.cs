@@ -1,6 +1,5 @@
 ﻿using Chr.Avro.Abstract;
 using Chr.Avro.Representation;
-using System.IO;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.Serialization;
 

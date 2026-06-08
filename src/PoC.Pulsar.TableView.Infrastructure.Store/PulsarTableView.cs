@@ -7,9 +7,7 @@ using PoC.Pulsar.TableView.Domain.Projector;
 using PoC.Pulsar.TableView.Domain.TableView;
 using PoC.Pulsar.TableView.Infrastructure.Store.Observability;
 using PoC.Pulsar.TableView.Infrastructure.Store.Readers;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
 
@@ -249,46 +247,66 @@ public sealed class PulsarTableView<TMessage> : IPulsarTableView<TMessage>
 
         activity?.SetTag("result", "success");
 
-        if (applyResult is not TableMessageApplied<TMessage> applied)
+        if (applyResult is TableMessageApplied<TMessage> applied)
         {
-            return null;
+            switch (applied.Decision.Kind)
+            {
+                case TableMessageApplyKind.Created:
+                {
+                    if (_snapshot.ContainsKey(applied.EntityId))
+                    {
+                        throw new InvalidOperationException($"Snapshot entry '{applied.EntityId}' already existed while applying a create.");
+                    }
+
+                    var created = new TableEntryCreated<TMessage>(applied.EntityId, applied.NewValue);
+                    _snapshot.AddOrUpdate(applied.EntityId, applied.NewValue, (_, _) => applied.NewValue);
+
+                    if (emitEvents)
+                    {
+                        _subject.OnNext(created);
+                    }
+
+                    return collectDelta ? created : null;
+                }
+                case TableMessageApplyKind.Updated:
+                {
+                    if (!_snapshot.TryGetValue(applied.EntityId, out var currentValue))
+                    {
+                        throw new InvalidOperationException($"Snapshot entry '{applied.EntityId}' was missing while applying an update.");
+                    }
+
+                    var updated = new TableEntryUpdated<TMessage>(applied.EntityId, applied.NewValue, currentValue);
+                    _snapshot.AddOrUpdate(applied.EntityId, applied.NewValue, (_, _) => applied.NewValue);
+
+                    if (emitEvents)
+                    {
+                        _subject.OnNext(updated);
+                    }
+
+                    return collectDelta ? updated : null;
+                }
+                case TableMessageApplyKind.NoOp:
+                    activity?.SetTag("result", "noop");
+                    return null;
+                default:
+                    throw new NotSupportedException($"Unsupported apply decision kind '{applied.Decision.Kind}'.");
+            }
         }
 
-        switch (applied.Change)
+        if (applyResult is TableMessageDeleted<TMessage> deleted)
         {
-            case TableEntryCreated<TMessage> created:
-                _snapshot.AddOrUpdate(created.Key, created.NewValue, (_, _) => created.NewValue);
+            var eventDeleted = new EventDeleted<TMessage>(deleted.EntityId, deleted.CurrentValue);
+            _snapshot.TryRemove(deleted.EntityId, out _);
 
-                if (emitEvents)
-                {
-                    _subject.OnNext(created);
-                }
+            if (emitEvents)
+            {
+                _subject.OnNext(eventDeleted);
+            }
 
-                return collectDelta ? created : null;
-
-            case TableEntryUpdated<TMessage> updated:
-                _snapshot.AddOrUpdate(updated.Key, updated.NewValue, (_, _) => updated.NewValue);
-
-                if (emitEvents)
-                {
-                    _subject.OnNext(updated);
-                }
-
-                return collectDelta ? updated : null;
-
-            case EventDeleted<TMessage> deleted:
-                _snapshot.TryRemove(deleted.Key, out _);
-
-                if (emitEvents)
-                {
-                    _subject.OnNext(deleted);
-                }
-
-                return collectDelta ? deleted : null;
-
-            default:
-                return null;
+            return collectDelta ? eventDeleted : null;
         }
+
+        return null;
     }
 
     private void RecordMessageProcessed(TableViewMessage tableViewMessage, ProcessPhase phase, TagList tags, Stopwatch stopwatch)

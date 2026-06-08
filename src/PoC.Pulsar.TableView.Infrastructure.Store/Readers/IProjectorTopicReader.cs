@@ -1,5 +1,4 @@
 using PoC.Pulsar.TableView.Domain.TableView;
-using System.Collections.Generic;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.Readers;
 

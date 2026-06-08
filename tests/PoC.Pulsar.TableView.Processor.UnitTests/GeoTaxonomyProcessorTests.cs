@@ -873,6 +873,9 @@ public sealed class GeoTaxonomyProcessorTests
         public ValueTask UpsertAsync(TMessage message, CancellationToken cancellationToken)
             => ValueTask.CompletedTask;
 
+        public ValueTask<TableMessageApplyDecision> TryApplyAsync(TMessage message, CancellationToken cancellationToken)
+            => throw new NotSupportedException();
+
         public Dictionary<string, TMessage> GetAll(IValuePredicate<TMessage>? valuePredicate = null)
             => [];
     }

@@ -7,10 +7,8 @@ using PoC.Pulsar.TableView.Domain.Rejected;
 using PoC.Pulsar.TableView.Infrastructure.Store.Observability;
 using PoC.Pulsar.TableView.Infrastructure.Store.Readers;
 using System.Buffers;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-using System.IO;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.Publisher;
 

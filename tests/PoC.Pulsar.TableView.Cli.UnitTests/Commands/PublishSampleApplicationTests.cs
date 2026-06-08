@@ -1,4 +1,5 @@
 using PoC.Pulsar.TableView.Cli.Commands;
+using PoC.Pulsar.TableView.Cli.CompactTopic;
 using PoC.Pulsar.TableView.Cli.Publishing;
 using PoC.Pulsar.TableView.Cli.Tsavorite;
 using Xunit;
@@ -60,7 +61,7 @@ public sealed class PublishSampleApplicationTests
     {
         var publisher = new FakeSamplePublisher();
         var runner = new FakeTsavoriteCommandRunner();
-        var application = new PublishSampleApplication(publisher, runner);
+        var application = new PublishSampleApplication(publisher, runner, null);
 
         var result = application.Run(["tsavorite", "list", "sports"]);
 
@@ -76,7 +77,7 @@ public sealed class PublishSampleApplicationTests
     {
         var publisher = new FakeSamplePublisher();
         var runner = new FakeTsavoriteCommandRunner();
-        var application = new PublishSampleApplication(publisher, runner);
+        var application = new PublishSampleApplication(publisher, runner, null);
 
         var result = application.Run(["tsavorite", "get", "sports", "--key", "sport-1"]);
 
@@ -91,12 +92,27 @@ public sealed class PublishSampleApplicationTests
     {
         var publisher = new FakeSamplePublisher();
         var runner = new FakeTsavoriteCommandRunner();
-        var application = new PublishSampleApplication(publisher, runner);
+        var application = new PublishSampleApplication(publisher, runner, null);
 
         var result = application.Run(["tsavorite", "list", "sports", "--watch", "20s"]);
 
         Assert.Equal(0, result);
         Assert.Equal("20s", runner.LastVerb!.Watch);
+    }
+
+    [Fact]
+    public void run_should_call_compact_topic_runner_for_compact_topic_command()
+    {
+        var publisher = new FakeSamplePublisher();
+        var runner = new FakeCompactTopicCommandRunner();
+        var application = new PublishSampleApplication(publisher, tsavoriteCommandRunner: null, compactTopicCommandRunner: runner);
+
+        var result = application.Run(["compact-topic", "sports"]);
+
+        Assert.Equal(0, result);
+        Assert.False(publisher.WasCalled);
+        Assert.NotNull(runner.LastVerb);
+        Assert.Equal("sports", runner.LastVerb!.Topic);
     }
 
     private sealed class FakeSamplePublisher : ISamplePublisher
@@ -115,6 +131,17 @@ public sealed class PublishSampleApplicationTests
         public TsavoriteVerb? LastVerb { get; private set; }
 
         public Task<int> RunAsync(TsavoriteVerb verb, CancellationToken cancellationToken)
+        {
+            LastVerb = verb;
+            return Task.FromResult(0);
+        }
+    }
+
+    private sealed class FakeCompactTopicCommandRunner : ICompactTopicCommandRunner
+    {
+        public CompactTopicVerb? LastVerb { get; private set; }
+
+        public Task<int> RunAsync(CompactTopicVerb verb, CancellationToken cancellationToken)
         {
             LastVerb = verb;
             return Task.FromResult(0);

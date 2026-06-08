@@ -1,7 +1,5 @@
 using PoC.Pulsar.TableView.Domain.Categories;
 using PoC.Pulsar.TableView.Domain.Sports;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.Storages;
 

@@ -1,6 +1,4 @@
-﻿using System.Collections.Generic;
-using PoC.Pulsar.TableView.Contracts;
-using PoC.Pulsar.TableView.Domain.Categories;
+﻿using PoC.Pulsar.TableView.Contracts;
 using PoC.Pulsar.TableView.Domain.MaterializeViews;
 using PoC.Pulsar.TableView.Domain.Metadatas;
 

@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using PoC.Pulsar.TableView.Cli.Commands;
 using PoC.Pulsar.TableView.Cli.Configuration;
+using PoC.Pulsar.TableView.Cli.CompactTopic;
 using PoC.Pulsar.TableView.Cli.Publishing;
 using PoC.Pulsar.TableView.Cli.Pulsar;
 using PoC.Pulsar.TableView.Cli.Samples;
@@ -31,7 +32,9 @@ internal static class CliHost
             .AddOptions<PulsarPublishOptions>()
             .Bind(builder.Configuration.GetSection(PulsarPublishOptions.SectionName))
             .Validate(options => Uri.TryCreate(options.ServiceUrl, UriKind.Absolute, out _), "Pulsar:ServiceUrl must be a valid URI.")
-            .Validate(options => !string.IsNullOrWhiteSpace(options.InputNamespace), "Pulsar:InputNamespace is required.");
+            .Validate(options => Uri.TryCreate(options.AdminUrl, UriKind.Absolute, out _), "Pulsar:AdminUrl must be a valid URI.")
+            .Validate(options => !string.IsNullOrWhiteSpace(options.InputNamespace), "Pulsar:InputNamespace is required.")
+            .Validate(options => !string.IsNullOrWhiteSpace(options.OutputNamespace), "Pulsar:OutputNamespace is required.");
 
         builder.Services
             .AddOptions<TsavoriteViewerOptions>()
@@ -43,6 +46,8 @@ internal static class CliHost
         builder.Services.AddSingleton<ISampleDataLoader, SampleDataLoader>();
         builder.Services.AddSingleton<ISampleSchemaSerializer, AvroSampleSchemaSerializer>();
         builder.Services.AddSingleton<IPulsarMessageProducerFactory, DotPulsarMessageProducerFactory>();
+        builder.Services.AddSingleton<IPulsarAdminClient, DotPulsarAdminClient>();
+        builder.Services.AddSingleton<ICompactTopicCommandRunner, CompactTopicCommandRunner>();
         builder.Services.AddSingleton<ITsavoriteViewerClient, TsavoriteViewerClient>();
         builder.Services.AddSingleton<ITsavoriteCommandRunner, TsavoriteCommandRunner>();
 

@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using System.Text;
 using PoC.Pulsar.TableView.Domain.Categories;
 using PoC.Pulsar.TableView.Domain.Sports;

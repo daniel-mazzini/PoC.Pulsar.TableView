@@ -5,8 +5,8 @@ using PoC.Pulsar.TableView.Domain.Categories;
 using PoC.Pulsar.TableView.Domain.Checkpoints;
 using PoC.Pulsar.TableView.Domain.Filter;
 using PoC.Pulsar.TableView.Domain.MaterializeViews;
+using PoC.Pulsar.TableView.Domain.Projector;
 using PoC.Pulsar.TableView.Domain.Rejected;
-using PoC.Pulsar.TableView.Domain.Sports;
 using PoC.Pulsar.TableView.Domain.Serializers;
 using PoC.Pulsar.TableView.Domain.Storages.Entities;
 using PoC.Pulsar.TableView.Domain.Storages.StateStore;
@@ -53,7 +53,9 @@ internal sealed class FakeSportMessageStorage : IMessageStorage<string, SportMes
 
     public int ClearCallCount { get; private set; }
     public int UpsertCallCount { get; private set; }
+    public int TryApplyCallCount { get; private set; }
     public int DeleteCallCount { get; private set; }
+    public bool ThrowOnTryApply { get; set; }
 
     public void Seed(SportMessage message)
         => _messages[message.Id] = Clone(message);
@@ -80,6 +82,30 @@ internal sealed class FakeSportMessageStorage : IMessageStorage<string, SportMes
         UpsertCallCount++;
         _messages[message.Id] = Clone(message);
         return ValueTask.CompletedTask;
+    }
+
+    public ValueTask<TableMessageApplyDecision> TryApplyAsync(SportMessage message, CancellationToken cancellationToken)
+    {
+        TryApplyCallCount++;
+
+        if (ThrowOnTryApply)
+        {
+            throw new InvalidOperationException("TryApply failed.");
+        }
+
+        if (!_messages.TryGetValue(message.Id, out var current))
+        {
+            _messages[message.Id] = Clone(message);
+            return ValueTask.FromResult(TableMessageApplyDecision.Created());
+        }
+
+        if (message.Version <= current.Version)
+        {
+            return ValueTask.FromResult(TableMessageApplyDecision.NoOp("incoming_version_not_greater_than_current"));
+        }
+
+        _messages[message.Id] = Clone(message);
+        return ValueTask.FromResult(TableMessageApplyDecision.Updated());
     }
 
     public Dictionary<string, SportMessage> GetAll(IValuePredicate<SportMessage>? valuePredicate = null)
@@ -121,7 +147,9 @@ internal sealed class FakeRawCategoryMessageStorage : IMessageStorage<string, Ra
 
     public int ClearCallCount { get; private set; }
     public int UpsertCallCount { get; private set; }
+    public int TryApplyCallCount { get; private set; }
     public int DeleteCallCount { get; private set; }
+    public bool ThrowOnTryApply { get; set; }
 
     public void Seed(RawCategoryMessage message)
         => _messages[message.Id] = Clone(message);
@@ -148,6 +176,30 @@ internal sealed class FakeRawCategoryMessageStorage : IMessageStorage<string, Ra
         UpsertCallCount++;
         _messages[message.Id] = Clone(message);
         return ValueTask.CompletedTask;
+    }
+
+    public ValueTask<TableMessageApplyDecision> TryApplyAsync(RawCategoryMessage message, CancellationToken cancellationToken)
+    {
+        TryApplyCallCount++;
+
+        if (ThrowOnTryApply)
+        {
+            throw new InvalidOperationException("TryApply failed.");
+        }
+
+        if (!_messages.TryGetValue(message.Id, out var current))
+        {
+            _messages[message.Id] = Clone(message);
+            return ValueTask.FromResult(TableMessageApplyDecision.Created());
+        }
+
+        if (message.Version <= current.Version)
+        {
+            return ValueTask.FromResult(TableMessageApplyDecision.NoOp("incoming_version_not_greater_than_current"));
+        }
+
+        _messages[message.Id] = Clone(message);
+        return ValueTask.FromResult(TableMessageApplyDecision.Updated());
     }
 
     public Dictionary<string, RawCategoryMessage> GetAll(IValuePredicate<RawCategoryMessage>? valuePredicate = null)

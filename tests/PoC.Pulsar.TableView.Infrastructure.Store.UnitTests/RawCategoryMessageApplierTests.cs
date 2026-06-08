@@ -22,10 +22,10 @@ public sealed class RawCategoryMessageApplierTests
         var result = await applier.ApplyAsync(input, ProcessPhase.Bootstrap, unitOfWork, DeserializeCategoryMessage, CancellationToken.None);
 
         var applied = Assert.IsType<TableMessageApplied<RawCategoryMessage>>(result);
-        var created = Assert.IsType<TableEntryCreated<RawCategoryMessage>>(applied.Change);
-        Assert.Equal("category-1", created.Key);
-        Assert.Equal("parent-missing", created.NewValue.ParentId);
-        Assert.Equal(1, messageStorage.UpsertCallCount);
+        Assert.Equal("category-1", applied.EntityId);
+        Assert.Equal("parent-missing", applied.NewValue.ParentId);
+        Assert.Equal(TableMessageApplyKind.Created, applied.Decision.Kind);
+        Assert.Equal(1, messageStorage.TryApplyCallCount);
         Assert.Single(checkpointStorage.SavedCheckpoints);
         Assert.Empty(publisher.PublishedMessages);
     }
@@ -44,8 +44,8 @@ public sealed class RawCategoryMessageApplierTests
         var result = await applier.ApplyAsync(input, ProcessPhase.Bootstrap, unitOfWork, DeserializeCategoryMessage, CancellationToken.None);
 
         var applied = Assert.IsType<TableMessageApplied<RawCategoryMessage>>(result);
-        Assert.IsType<TableEntryCreated<RawCategoryMessage>>(applied.Change);
-        Assert.Equal(1, messageStorage.UpsertCallCount);
+        Assert.Equal(TableMessageApplyKind.Created, applied.Decision.Kind);
+        Assert.Equal(1, messageStorage.TryApplyCallCount);
         Assert.Empty(publisher.PublishedMessages);
     }
 
@@ -70,7 +70,7 @@ public sealed class RawCategoryMessageApplierTests
         Assert.Single(publisher.PublishedMessages);
         Assert.NotNull(rejectedStorage.LastSaved);
         Assert.Single(checkpointStorage.SavedCheckpoints);
-        Assert.Equal(0, messageStorage.UpsertCallCount);
+        Assert.Equal(0, messageStorage.TryApplyCallCount);
     }
 
     [Fact]
@@ -142,9 +142,27 @@ public sealed class RawCategoryMessageApplierTests
 
         var result = await applier.ApplyAsync(input, ProcessPhase.Bootstrap, unitOfWork, DeserializeCategoryMessage, CancellationToken.None);
 
-        var applied = Assert.IsType<TableMessageApplied<RawCategoryMessage>>(result);
-        Assert.IsType<EventDeleted<RawCategoryMessage>>(applied.Change);
+        var deleted = Assert.IsType<TableMessageDeleted<RawCategoryMessage>>(result);
+        Assert.Equal("category-1", deleted.EntityId);
+        Assert.Equal(existing.Version, deleted.CurrentValue.Version);
         Assert.Equal(1, messageStorage.DeleteCallCount);
+    }
+
+    [Fact]
+    public async Task apply_async_should_not_save_checkpoint_when_try_apply_fails()
+    {
+        var messageStorage = new FakeRawCategoryMessageStorage { ThrowOnTryApply = true };
+        var checkpointStorage = new FakeCheckpointStorage();
+        var rejectedStorage = new FakeRejectedStorage();
+        var unitOfWork = new FakeCategoryTableViewUnitOfWork(messageStorage, checkpointStorage, rejectedStorage);
+        var publisher = new FakeRejectedMessagePublisher();
+        var applier = new RawCategoryMessageApplier(publisher);
+        var input = CreateInput(Category("category-1", "sport-1", parentId: null), new PulsarMessageId(1, 10, 0, 0));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await applier.ApplyAsync(input, ProcessPhase.Bootstrap, unitOfWork, DeserializeCategoryMessage, CancellationToken.None));
+
+        Assert.Empty(checkpointStorage.SavedCheckpoints);
     }
 
     [Fact]

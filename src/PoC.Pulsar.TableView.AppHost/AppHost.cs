@@ -55,6 +55,54 @@ builder.AddExecutable(
     .WaitForCompletion(pulsarInit)
     .WithExplicitStart();
 
+builder.AddExecutable(
+        "cli-compact-sports",
+        "dotnet",
+        repositoryRoot,
+        "run",
+        "--project",
+        "src/PoC.Pulsar.TableView.Cli/PoC.Pulsar.TableView.Cli.csproj",
+        "--",
+        "compact-topic",
+        "sports")
+    .WithEnvironment("Pulsar__AdminUrl", "http://127.0.0.1:8080")
+    .WithEnvironment("Pulsar__InputNamespace", "public/tableview-inputs")
+    .WithEnvironment("Pulsar__OutputNamespace", "public/tableview-outputs")
+    .WaitForCompletion(pulsarInit)
+    .WithExplicitStart();
+
+builder.AddExecutable(
+        "cli-compact-categories",
+        "dotnet",
+        repositoryRoot,
+        "run",
+        "--project",
+        "src/PoC.Pulsar.TableView.Cli/PoC.Pulsar.TableView.Cli.csproj",
+        "--",
+        "compact-topic",
+        "categories")
+    .WithEnvironment("Pulsar__AdminUrl", "http://127.0.0.1:8080")
+    .WithEnvironment("Pulsar__InputNamespace", "public/tableview-inputs")
+    .WithEnvironment("Pulsar__OutputNamespace", "public/tableview-outputs")
+    .WaitForCompletion(pulsarInit)
+    .WithExplicitStart();
+
+builder.AddExecutable(
+        "cli-compact-taxonomy-view",
+        "dotnet",
+        repositoryRoot,
+        "run",
+        "--project",
+        "src/PoC.Pulsar.TableView.Cli/PoC.Pulsar.TableView.Cli.csproj",
+        "--",
+        "compact-topic",
+        "taxonomy-view")
+    .WithEnvironment("Pulsar__AdminUrl", "http://127.0.0.1:8080")
+    .WithEnvironment("Pulsar__InputNamespace", "public/tableview-inputs")
+    .WithEnvironment("Pulsar__OutputNamespace", "public/tableview-outputs")
+    .WaitForCompletion(pulsarInit)
+    .WithExplicitStart();
+
 var processor = builder.AddExecutable(
         "processor",
         "dotnet",

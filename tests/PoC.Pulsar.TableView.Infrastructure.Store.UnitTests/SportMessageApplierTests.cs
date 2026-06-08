@@ -23,10 +23,10 @@ public sealed class SportMessageApplierTests
         var result = await applier.ApplyAsync(input, ProcessPhase.Bootstrap, unitOfWork, DeserializeSportMessage, CancellationToken.None);
 
         var applied = Assert.IsType<TableMessageApplied<SportMessage>>(result);
-        var created = Assert.IsType<TableEntryCreated<SportMessage>>(applied.Change);
-        Assert.Equal("sport-1", created.Key);
-        Assert.Equal(2, created.NewValue.Version);
-        Assert.Equal(1, messageStorage.UpsertCallCount);
+        Assert.Equal("sport-1", applied.EntityId);
+        Assert.Equal(2, applied.NewValue.Version);
+        Assert.Equal(TableMessageApplyKind.Created, applied.Decision.Kind);
+        Assert.Equal(1, messageStorage.TryApplyCallCount);
         Assert.Single(checkpointStorage.SavedCheckpoints);
         Assert.Empty(publisher.PublishedMessages);
         Assert.Null(rejectedStorage.LastSaved);
@@ -46,12 +46,11 @@ public sealed class SportMessageApplierTests
         var result = await applier.ApplyAsync(input, ProcessPhase.Bootstrap, unitOfWork, DeserializeSportMessage, CancellationToken.None);
 
         var applied = Assert.IsType<TableMessageApplied<SportMessage>>(result);
-        var updated = Assert.IsType<TableEntryUpdated<SportMessage>>(applied.Change);
-        Assert.Equal("sport-1", updated.Key);
-        Assert.Equal(2, updated.NewValue.Version);
-        Assert.Equal(1, updated.CurrentValue.Version);
+        Assert.Equal("sport-1", applied.EntityId);
+        Assert.Equal(2, applied.NewValue.Version);
+        Assert.Equal(TableMessageApplyKind.Updated, applied.Decision.Kind);
         Assert.Equal(2, messageStorage.GetById("sport-1")!.Version);
-        Assert.Equal(1, messageStorage.UpsertCallCount);
+        Assert.Equal(1, messageStorage.TryApplyCallCount);
         Assert.Single(checkpointStorage.SavedCheckpoints);
     }
 
@@ -71,7 +70,7 @@ public sealed class SportMessageApplierTests
         var noOp = Assert.IsType<TableMessageNoOp<SportMessage>>(result);
         Assert.Equal("incoming_version_not_greater_than_current", noOp.Reason);
         Assert.Equal(5, messageStorage.GetById("sport-1")!.Version);
-        Assert.Equal(0, messageStorage.UpsertCallCount);
+        Assert.Equal(1, messageStorage.TryApplyCallCount);
         Assert.Single(checkpointStorage.SavedCheckpoints);
         Assert.Empty(publisher.PublishedMessages);
         Assert.Null(rejectedStorage.LastSaved);
@@ -93,7 +92,7 @@ public sealed class SportMessageApplierTests
         var noOp = Assert.IsType<TableMessageNoOp<SportMessage>>(result);
         Assert.Equal("incoming_version_not_greater_than_current", noOp.Reason);
         Assert.Equal(5, messageStorage.GetById("sport-1")!.Version);
-        Assert.Equal(0, messageStorage.UpsertCallCount);
+        Assert.Equal(1, messageStorage.TryApplyCallCount);
         Assert.Single(checkpointStorage.SavedCheckpoints);
     }
 
@@ -133,13 +132,31 @@ public sealed class SportMessageApplierTests
 
         var result = await applier.ApplyAsync(input, ProcessPhase.Bootstrap, unitOfWork, DeserializeSportMessage, CancellationToken.None);
 
-        var applied = Assert.IsType<TableMessageApplied<SportMessage>>(result);
-        var deleted = Assert.IsType<EventDeleted<SportMessage>>(applied.Change);
-        Assert.Equal("sport-1", deleted.Key);
+        var deleted = Assert.IsType<TableMessageDeleted<SportMessage>>(result);
+        Assert.Equal("sport-1", deleted.EntityId);
+        Assert.Equal(7, deleted.CurrentValue.Version);
         Assert.Equal(1, messageStorage.DeleteCallCount);
         Assert.Null(messageStorage.GetById("sport-1"));
         Assert.Single(checkpointStorage.SavedCheckpoints);
         Assert.Empty(publisher.PublishedMessages);
+    }
+
+    [Fact]
+    public async Task apply_async_should_not_save_checkpoint_when_try_apply_fails()
+    {
+        var messageStorage = expect_message_storage_sport_by_id_return_null();
+        messageStorage.ThrowOnTryApply = true;
+        var checkpointStorage = new FakeCheckpointStorage();
+        var rejectedStorage = new FakeRejectedStorage();
+        var unitOfWork = new FakeSportTableViewUnitOfWork(messageStorage, checkpointStorage, rejectedStorage);
+        var publisher = new FakeRejectedMessagePublisher();
+        var applier = new SportMessageApplier(publisher);
+        var input = CreateInput(Sport("sport-1", version: 2), new PulsarMessageId(1, 10, 0, 0));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await applier.ApplyAsync(input, ProcessPhase.Bootstrap, unitOfWork, DeserializeSportMessage, CancellationToken.None));
+
+        Assert.Empty(checkpointStorage.SavedCheckpoints);
     }
 
     [Fact]

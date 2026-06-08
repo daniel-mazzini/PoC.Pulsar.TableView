@@ -5,7 +5,6 @@ using PoC.Pulsar.TableView.Domain.TableView;
 using PoC.Pulsar.TableView.Infrastructure.Store.Observability;
 using PoC.Pulsar.TableView.Infrastructure.Store.Readers;
 using System.Buffers;
-using System.Collections.Generic;
 using System.Diagnostics;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store;
@@ -56,7 +55,7 @@ public class SportMessageApplier : ITableViewMessageApplier<SportMessage>
 
         await unitOfWork.MessageStorage.DeleteAsync(input.Key, cancellationToken);
         await unitOfWork.CheckpointStorage.SaveCheckpointAsync(input.Shard, input.BrokerMessageId, cancellationToken);
-        return new TableMessageApplied<SportMessage>(new EventDeleted<SportMessage>(input.Key, deletedValue));
+        return new TableMessageDeleted<SportMessage>(input.Key, deletedValue);
     }
 
     private async Task<TableMessageApplyResult<SportMessage>> ApplyWithVersionValidationAsync(ITableViewUnitOfWork<SportMessage> tableViewUnitOfWork, TableViewMessage input, SportMessage message, CancellationToken cancellationToken)
@@ -69,23 +68,15 @@ public class SportMessageApplier : ITableViewMessageApplier<SportMessage>
             return new TableMessageRejected<SportMessage>(message.Id, validationError);
         }
 
-        var current = await tableViewUnitOfWork.MessageStorage.TryLoadAsync(message.Id, cancellationToken);
-        if (current is not null && message.Version <= current.Version)
-        {
-            await tableViewUnitOfWork.CheckpointStorage.SaveCheckpointAsync(input.Shard, input.BrokerMessageId, cancellationToken);
-            return new TableMessageNoOp<SportMessage>(message.Id, "incoming_version_not_greater_than_current");
-        }
-
-        if (current is null)
-        {
-            await tableViewUnitOfWork.MessageStorage.UpsertAsync(message, cancellationToken);
-            await tableViewUnitOfWork.CheckpointStorage.SaveCheckpointAsync(input.Shard, input.BrokerMessageId, cancellationToken);
-            return new TableMessageApplied<SportMessage>(new TableEntryCreated<SportMessage>(message.Id, message));
-        }
-
-        await tableViewUnitOfWork.MessageStorage.UpsertAsync(message, cancellationToken);
+        var decision = await tableViewUnitOfWork.MessageStorage.TryApplyAsync(message, cancellationToken);
         await tableViewUnitOfWork.CheckpointStorage.SaveCheckpointAsync(input.Shard, input.BrokerMessageId, cancellationToken);
-        return new TableMessageApplied<SportMessage>(new TableEntryUpdated<SportMessage>(message.Id, message, current));
+        return decision.Kind switch
+        {
+            TableMessageApplyKind.NoOp => new TableMessageNoOp<SportMessage>(message.Id, decision.Reason ?? "unknown"),
+            TableMessageApplyKind.Created => new TableMessageApplied<SportMessage>(message.Id, message, decision),
+            TableMessageApplyKind.Updated => new TableMessageApplied<SportMessage>(message.Id, message, decision),
+            _ => throw new NotSupportedException($"Unsupported apply decision kind '{decision.Kind}'.")
+        };
     }
 
     private async ValueTask SaveSportAsRejectedAsync(ITableViewUnitOfWork<SportMessage> uow, TableViewMessage originalMesage, SportMessage message, RejectedReason reason, CancellationToken cancellationToken)
@@ -156,8 +147,7 @@ public class SportMessageApplier : ITableViewMessageApplier<SportMessage>
             new KeyValuePair<string, object?>("topic", rejectedMessage.OriginalTopic),
             new KeyValuePair<string, object?>("partition", rejectedMessage.OriginalPartitionId),
             new KeyValuePair<string, object?>("entity_type", headers["event-type"] ?? "na" ),
-            new KeyValuePair<string, object?>("message_type", "sports"),
-            new KeyValuePair<string, object?>("result", "success")
+            new KeyValuePair<string, object?>("message_type", "sports")
         };
 
         using var activity = ProjectorStoreTelemetry.StartActivity("projection.rejected.publish",
@@ -170,19 +160,15 @@ public class SportMessageApplier : ITableViewMessageApplier<SportMessage>
         try
         {
             await _rejectedMessagePublisher.PublishAsync(rejectedMessage, headers, cancellationToken);
-            ProjectorStoreTelemetry.RejectedPublished.Add(1, tags);
-            ProjectorStoreTelemetry.RejectedPublishDuration.Record(stopwatch.Elapsed.TotalMilliseconds, tags);
+            KeyValuePair<string, object?>[] successTags = [..tags, new KeyValuePair<string, object?>("result", "success")];
+            ProjectorStoreTelemetry.RejectedPublished.Add(1, successTags);
+            ProjectorStoreTelemetry.RejectedPublishDuration.Record(stopwatch.Elapsed.TotalMilliseconds, successTags);
             activity?.SetTag("result", "success");
         }
         catch (Exception exception)
         {
-            ProjectorStoreTelemetry.RejectedPublishErrors.Add(1,
-                                                              ProjectorStoreTelemetry.StoreTag,
-                                                              new KeyValuePair<string, object?>("topic", rejectedMessage.OriginalTopic),
-                                                              new KeyValuePair<string, object?>("entity_type", rejectedMessage.OriginalTopic == PulsarTopics.Sports ? PulsarTopics.Sports : PulsarTopics.Categories),
-                                                              new KeyValuePair<string, object?>("message_type", headers["type"]),
-                                                              new KeyValuePair<string, object?>("event_type", headers["event-type"]),
-                                                              new KeyValuePair<string, object?>("result", "error"));
+            KeyValuePair<string, object?>[] errorTags = [..tags, new KeyValuePair<string, object?>("result", "error")];
+            ProjectorStoreTelemetry.RejectedPublishErrors.Add(1, errorTags);
             activity?.SetTag("result", "error");
             activity?.SetStatus(ActivityStatusCode.Error, exception.GetType().Name);
             throw;

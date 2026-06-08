@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using PoC.Pulsar.TableView.Domain.Projector;
 using PoC.Pulsar.TableView.Domain.TableView;
 using PoC.Pulsar.TableView.Infrastructure.Store.IntegrationTests.Support;
 
@@ -27,6 +28,49 @@ public sealed class SportMessageStorageTests
         Assert.NotNull(loaded);
         Assert.Equal(message.Id, loaded.Id);
         Assert.Equal(message.Version, loaded.Version);
+    }
+
+    [Fact]
+    public async Task try_apply_async_should_create_when_message_does_not_exist()
+    {
+        using var context = new TsavoriteIntegrationContext(nameof(try_apply_async_should_create_when_message_does_not_exist));
+        var storage = context.CreateSportMessageStorage();
+        var message = IntegrationTestData.Sport("sport-1", version: 1);
+
+        var result = await storage.TryApplyAsync(message, CancellationToken.None);
+
+        Assert.Equal(TableMessageApplyKind.Created, result.Kind);
+        Assert.Equal(message.Version, (await storage.TryLoadAsync(message.Id, CancellationToken.None))!.Version);
+    }
+
+    [Fact]
+    public async Task try_apply_async_should_return_noop_when_incoming_version_is_not_greater()
+    {
+        using var context = new TsavoriteIntegrationContext(nameof(try_apply_async_should_return_noop_when_incoming_version_is_not_greater));
+        var storage = context.CreateSportMessageStorage();
+        var existing = IntegrationTestData.Sport("sport-1", version: 5);
+        await storage.UpsertAsync(existing, CancellationToken.None);
+
+        var result = await storage.TryApplyAsync(IntegrationTestData.Sport("sport-1", version: 5), CancellationToken.None);
+
+        Assert.Equal(TableMessageApplyKind.NoOp, result.Kind);
+        Assert.Equal("incoming_version_not_greater_than_current", result.Reason);
+        Assert.Equal(5, (await storage.TryLoadAsync("sport-1", CancellationToken.None))!.Version);
+    }
+
+    [Fact]
+    public async Task try_apply_async_should_update_when_incoming_version_is_greater()
+    {
+        using var context = new TsavoriteIntegrationContext(nameof(try_apply_async_should_update_when_incoming_version_is_greater));
+        var storage = context.CreateSportMessageStorage();
+        var existing = IntegrationTestData.Sport("sport-1", version: 1);
+        await storage.UpsertAsync(existing, CancellationToken.None);
+
+        var incoming = IntegrationTestData.Sport("sport-1", version: 2);
+        var result = await storage.TryApplyAsync(incoming, CancellationToken.None);
+
+        Assert.Equal(TableMessageApplyKind.Updated, result.Kind);
+        Assert.Equal(2, (await storage.TryLoadAsync("sport-1", CancellationToken.None))!.Version);
     }
 
     [Fact]
@@ -131,5 +175,63 @@ public sealed class SportMessageStorageTests
 
         _output.WriteLine($"unit of work total elapsed: {uow_writer_stopwatch.Elapsed}");
         _output.WriteLine($"commit time: {uow_writer_stopwatch.Elapsed - TimeSpan.FromMilliseconds(writer_in_memory_milliseconds)}");
+    }
+
+    [Fact]
+    public async Task try_apply_async_should_compare_performance_against_try_load_plus_upsert_for_updates()
+    {
+        const int messageCount = 10_000;
+
+        using var legacyContext = new TsavoriteIntegrationContext(nameof(try_apply_async_should_compare_performance_against_try_load_plus_upsert_for_updates) + "_legacy");
+        using var rmwContext = new TsavoriteIntegrationContext(nameof(try_apply_async_should_compare_performance_against_try_load_plus_upsert_for_updates) + "_rmw");
+
+        var legacyStorage = legacyContext.CreateSportMessageStorage();
+        var rmwStorage = rmwContext.CreateSportMessageStorage();
+
+        for (var index = 0; index < messageCount; index++)
+        {
+            var seeded = IntegrationTestData.Sport($"sport-{index}", version: 1);
+            await legacyStorage.UpsertAsync(seeded, CancellationToken.None);
+            await rmwStorage.UpsertAsync(seeded, CancellationToken.None);
+        }
+
+        var legacyStopwatch = Stopwatch.StartNew();
+        for (var index = 0; index < messageCount; index++)
+        {
+            var incoming = IntegrationTestData.Sport($"sport-{index}", version: 2);
+            var current = await legacyStorage.TryLoadAsync(incoming.Id, CancellationToken.None);
+            if (current is null || incoming.Version > current.Version)
+            {
+                await legacyStorage.UpsertAsync(incoming, CancellationToken.None);
+            }
+        }
+        legacyStopwatch.Stop();
+
+        var rmwStopwatch = Stopwatch.StartNew();
+        for (var index = 0; index < messageCount; index++)
+        {
+            await rmwStorage.TryApplyAsync(IntegrationTestData.Sport($"sport-{index}", version: 2), CancellationToken.None);
+        }
+        rmwStopwatch.Stop();
+
+        _output.WriteLine($"legacy TryLoad+Upsert elapsed: {legacyStopwatch.Elapsed}");
+        _output.WriteLine($"rmw TryApply elapsed: {rmwStopwatch.Elapsed}");
+
+        Assert.Equal(messageCount, legacyStorage.GetAll().Count);
+        Assert.Equal(messageCount, rmwStorage.GetAll().Count);
+    }
+
+    [Fact]
+    public async Task try_apply_async_should_return_noop_when_incoming_version_is_lower()
+    {
+        using var context = new TsavoriteIntegrationContext(nameof(try_apply_async_should_return_noop_when_incoming_version_is_lower));
+        var storage = context.CreateSportMessageStorage();
+        await storage.UpsertAsync(IntegrationTestData.Sport("sport-1", version: 7), CancellationToken.None);
+
+        var result = await storage.TryApplyAsync(IntegrationTestData.Sport("sport-1", version: 6), CancellationToken.None);
+
+        Assert.Equal(TableMessageApplyKind.NoOp, result.Kind);
+        Assert.Equal("incoming_version_not_greater_than_current", result.Reason);
+        Assert.Equal(7, (await storage.TryLoadAsync("sport-1", CancellationToken.None))!.Version);
     }
 }

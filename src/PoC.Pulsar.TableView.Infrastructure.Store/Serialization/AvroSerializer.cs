@@ -1,9 +1,7 @@
 using Chr.Avro.Abstract;
 using Chr.Avro.Serialization;
 using System.Buffers;
-using System.Collections.Generic;
 using System.Collections.Immutable;
-using System.IO;
 using BinaryReader = Chr.Avro.Serialization.BinaryReader;
 using BinaryWriter = Chr.Avro.Serialization.BinaryWriter;
 

@@ -1,7 +1,5 @@
 using DotPulsar;
 using PoC.Pulsar.TableView.Domain.TableView;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.Readers;
 
