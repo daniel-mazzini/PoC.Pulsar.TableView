@@ -420,11 +420,30 @@ public sealed class PulsarTableView<TMessage> : IPulsarTableView<TMessage>
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            using var cancelledActivity = ProjectorStoreTelemetry.StartActivity("topic reader cancelled",
+                                                                                 shard.LogicalTopic,
+                                                                                 shard.PartitionId,
+                                                                                 phase: "live");
+            cancelledActivity?.SetTag("result", "cancelled");
+            ProjectorStoreTelemetry.TopicReaderCancelled.Add(1,
+                                                              ProjectorStoreTelemetry.StoreTag,
+                                                              new KeyValuePair<string, object?>("topic", shard.LogicalTopic),
+                                                              new KeyValuePair<string, object?>("phase", "live"));
             _logger.LogInformation("topic reader cancelled for topic {Topic} shard {Shard}", shard.LogicalTopic, shard.PhysicalTopic);
             throw;
         }
         catch (Exception exception)
         {
+            using var failedActivity = ProjectorStoreTelemetry.StartActivity("topic reader failed",
+                                                                             shard.LogicalTopic,
+                                                                             shard.PartitionId,
+                                                                             phase: "live");
+            failedActivity?.SetTag("result", "error");
+            failedActivity?.SetStatus(ActivityStatusCode.Error, exception.GetType().Name);
+            ProjectorStoreTelemetry.TopicReaderErrors.Add(1,
+                                                           ProjectorStoreTelemetry.StoreTag,
+                                                           new KeyValuePair<string, object?>("topic", shard.LogicalTopic),
+                                                           new KeyValuePair<string, object?>("phase", "live"));
             _logger.LogError(exception, "topic reader failed for topic {Topic} shard {Shard}", shard.LogicalTopic, shard.PhysicalTopic);
             throw;
         }

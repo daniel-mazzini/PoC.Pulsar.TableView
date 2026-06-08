@@ -105,16 +105,19 @@ public readonly record struct StorageKey(string Value)
     public static StorageKey CategoryMessagePrefix => "__geo-projector:raw:category:";
     public const string RejectedRecordPrefix = "__geo-projector:rejected:";
 
+    public const string CountryTaxonomyMaterializedViewPrefix = "__geo-projector:mv:country-taxonomy:";
+    public const string GeoTaxonomyViewMetadataPrefix = "__geo-projector:metadata:geo-taxonomy:";
+
     public static StorageKey CountryTaxonomyMaterializedView(SportId sportId)
     {
         string encodedSportId = EncodeSegment(sportId.Value);
-        return $"__geo-projector:mv:country-taxonomy:{encodedSportId}";
+        return $"{CountryTaxonomyMaterializedViewPrefix}{encodedSportId}";
     }
 
     public static StorageKey GeoTaxonomyViewMetadata(SportId sportId)
     {
         string encodedSportId = EncodeSegment(sportId.Value);
-        return $"__geo-projector:metadata:geo-taxonomy:{encodedSportId}";
+        return $"{GeoTaxonomyViewMetadataPrefix}{encodedSportId}";
     }
 
     public static StorageKey RejectedRecord(string recordId)

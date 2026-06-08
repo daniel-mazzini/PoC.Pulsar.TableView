@@ -21,8 +21,7 @@ internal sealed class TsavoriteIntegrationContext : IDisposable
         MetadataStorage = new MetadataStorage(Engine, StateSerializer);
         UnitOfWorkFactory = new UnitOfWorkFactory(Engine,
                                                  MetadataStorage,
-                                                 StateSerializer,
-                                                 new InMemoryGeoTaxonomyViewStorage());
+                                                 StateSerializer);
     }
 
     public ITsavoriteEngine Engine { get; }
@@ -46,6 +45,13 @@ internal sealed class TsavoriteIntegrationContext : IDisposable
 
     public CategoryMessageStorage CreateCategoryMessageStorage()
         => new(Engine, StateSerializer);
+
+    public TsavoriteGeoTaxonomyViewStorage CreateGeoTaxonomyViewStorage()
+    {
+        var session = new TsavoriteSessionWrapper(Engine);
+        _ownedSessions.Add(session);
+        return new TsavoriteGeoTaxonomyViewStorage(session, StateSerializer);
+    }
 
     public CheckpointStorage CreateCheckpointStorage()
         => new(new PoC.Pulsar.TableView.Infrastructure.Store.Storages.Session.TsavoriteSessionWrapper(Engine), StateSerializer, MetadataStorage);

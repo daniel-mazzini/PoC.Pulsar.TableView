@@ -28,9 +28,10 @@ public sealed class DotPulsarPropertyTaxonomyViewPublisher : ITaxonomyViewPublis
     }
     public async ValueTask PublishAsync(GeoTaxonomyViewMessage taxonomy, CancellationToken cancellationToken)
     {
+        var stopwatch = Stopwatch.StartNew();
         using var activity = ProjectorStoreTelemetry.StartActivity("projection.country_taxonomy_view.publish",
-                                                                   PulsarTopics.CountryTaxonomyViews,
-                                                                   operation: "Publish");
+                                                                    PulsarTopics.CountryTaxonomyViews,
+                                                                    operation: "Publish");
         activity?.SetTag("entity_type", "country_taxonomy_view");
         activity?.SetTag("message_type", nameof(GeoTaxonomyViewMessage));
         activity?.SetTag("event_type", EventType);
@@ -48,7 +49,22 @@ public sealed class DotPulsarPropertyTaxonomyViewPublisher : ITaxonomyViewPublis
             metadata[header.Key] = header.Value;
         }
 
-        await SendOne(taxonomy, activity, metadata, cancellationToken);
+        try
+        {
+            await SendOne(taxonomy, activity, metadata, cancellationToken);
+            var tags = TaxonomyViewTags("publish", "success");
+            ProjectorStoreTelemetry.TaxonomyViewPublished.Add(1, tags);
+            ProjectorStoreTelemetry.TaxonomyViewPublishDuration.Record(stopwatch.Elapsed.TotalMilliseconds, tags);
+        }
+        catch (Exception exception)
+        {
+            var tags = TaxonomyViewTags("publish", "error");
+            ProjectorStoreTelemetry.TaxonomyViewPublishErrors.Add(1, tags);
+            ProjectorStoreTelemetry.TaxonomyViewPublishDuration.Record(stopwatch.Elapsed.TotalMilliseconds, tags);
+            activity?.SetTag("result", "error");
+            activity?.SetStatus(ActivityStatusCode.Error, exception.GetType().Name);
+            throw;
+        }
     }
     
     private const int memory_10K = 10240;
@@ -92,7 +108,14 @@ public sealed class DotPulsarPropertyTaxonomyViewPublisher : ITaxonomyViewPublis
 
     public async ValueTask PublishDeleteMessageAsync(string sportId, DateTimeOffset eventTimeStamp, CancellationToken cancellationToken)
     {
-        
+        var stopwatch = Stopwatch.StartNew();
+        using var activity = ProjectorStoreTelemetry.StartActivity("projection.country_taxonomy_view.delete",
+                                                                    PulsarTopics.CountryTaxonomyViews,
+                                                                    operation: "Delete");
+        activity?.SetTag("entity_type", "country_taxonomy_view");
+        activity?.SetTag("message_type", nameof(GeoTaxonomyViewMessage));
+        activity?.SetTag("event_type", EventType);
+
         var metadata = new MessageMetadata
         {
             Key = sportId,
@@ -103,7 +126,23 @@ public sealed class DotPulsarPropertyTaxonomyViewPublisher : ITaxonomyViewPublis
         {
             metadata[header.Key] = header.Value;
         }
-        await _producer.Send(metadata, new ReadOnlySequence<byte>([]), cancellationToken);
+        try
+        {
+            await _producer.Send(metadata, new ReadOnlySequence<byte>([]), cancellationToken);
+            var tags = TaxonomyViewTags("delete", "success");
+            ProjectorStoreTelemetry.TaxonomyViewDeleted.Add(1, tags);
+            ProjectorStoreTelemetry.TaxonomyViewPublishDuration.Record(stopwatch.Elapsed.TotalMilliseconds, tags);
+            activity?.SetTag("result", "success");
+        }
+        catch (Exception exception)
+        {
+            var tags = TaxonomyViewTags("delete", "error");
+            ProjectorStoreTelemetry.TaxonomyViewPublishErrors.Add(1, tags);
+            ProjectorStoreTelemetry.TaxonomyViewPublishDuration.Record(stopwatch.Elapsed.TotalMilliseconds, tags);
+            activity?.SetTag("result", "error");
+            activity?.SetStatus(ActivityStatusCode.Error, exception.GetType().Name);
+            throw;
+        }
     }
 
     public async ValueTask PublishListMessage(IEnumerable<GeoTaxonomyViewMessage> taxonomies, CancellationToken cancellationToken)
@@ -143,6 +182,16 @@ public sealed class DotPulsarPropertyTaxonomyViewPublisher : ITaxonomyViewPublis
             ["message-id"] = messageId.ToString("D")
         };
     }
+
+    private static KeyValuePair<string, object?>[] TaxonomyViewTags(string operation, string result)
+        =>
+        [
+            ProjectorStoreTelemetry.StoreTag,
+            new("topic", PulsarTopics.CountryTaxonomyViews),
+            new("operation", operation),
+            new("result", result),
+            new("entity_type", "taxonomy_view")
+        ];
 
     
 

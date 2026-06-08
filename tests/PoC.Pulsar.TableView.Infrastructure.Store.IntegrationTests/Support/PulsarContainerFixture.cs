@@ -1,12 +1,15 @@
 using DotPulsar;
 using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Containers;
+using System.Collections.Concurrent;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.IntegrationTests.Support;
 
 public sealed class PulsarContainerFixture : IAsyncLifetime
 {
     private readonly IContainer _container;
+    private readonly ConcurrentDictionary<string, Lazy<Task<string>>> _sharedNamespaces = new(StringComparer.Ordinal);
+    private volatile bool _adminReady;
 
     public PulsarContainerFixture()
     {
@@ -34,6 +37,16 @@ public sealed class PulsarContainerFixture : IAsyncLifetime
     public async Task<string> CreateNamespaceAsync(string prefix)
     {
         var namespaceName = $"{prefix}-{Guid.CreateVersion7():N}".ToLowerInvariant();
+        return await CreateNamedNamespaceAsync(namespaceName);
+    }
+
+    public Task<string> GetOrCreateSharedNamespaceAsync(string prefix)
+        => _sharedNamespaces.GetOrAdd(prefix,
+                                      static (key, fixture) => new Lazy<Task<string>>(() => fixture.CreateNamedNamespaceAsync(key), LazyThreadSafetyMode.ExecutionAndPublication),
+                                      this).Value;
+
+    private async Task<string> CreateNamedNamespaceAsync(string namespaceName)
+    {
         await ExecAdminCommandAsync($"bin/pulsar-admin --admin-url http://127.0.0.1:8080 namespaces create public/{namespaceName} || true");
         return $"public/{namespaceName}";
     }
@@ -57,6 +70,11 @@ public sealed class PulsarContainerFixture : IAsyncLifetime
 
     private async Task EnsureAdminReadyAsync()
     {
+        if (_adminReady)
+        {
+            return;
+        }
+
         var deadline = DateTimeOffset.UtcNow.AddMinutes(2);
 
         while (DateTimeOffset.UtcNow < deadline)
@@ -66,6 +84,7 @@ public sealed class PulsarContainerFixture : IAsyncLifetime
                 var result = await _container.ExecAsync(["/bin/bash", "-lc", "bin/pulsar-admin --admin-url http://127.0.0.1:8080 brokers healthcheck"]);
                 if (result.ExitCode == 0)
                 {
+                    _adminReady = true;
                     return;
                 }
             }

@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Reactive.Subjects;
 using Microsoft.Extensions.Logging.Abstractions;
 using PoC.Pulsar.TableView.Contracts;
@@ -637,41 +638,108 @@ public sealed class GeoTaxonomyProcessorTests
 
     private sealed class TrackingCategoryBySportIndex : ICategoryRelationIndex
     {
-        private readonly InMemoryCategoryBySportIndex _inner = new();
+        private readonly Dictionary<SportId, HashSet<CategoryId>> _bySport = new();
+        private readonly Dictionary<CategoryId, HashSet<CategoryId>> _byParent = new();
 
         public int ClearCallCount { get; private set; }
 
         public ValueTask IndexCategoryAsync(CategoryRelations current, CancellationToken cancellationToken)
-            => _inner.IndexCategoryAsync(current, cancellationToken);
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            GetOrCreate(_bySport, current.SportId).Add(current.CategoryId);
+            if (current.ParentCategoryId is not null)
+            {
+                GetOrCreate(_byParent, current.ParentCategoryId.Value).Add(current.CategoryId);
+            }
+
+            return ValueTask.CompletedTask;
+        }
 
         public ValueTask ReplaceCategoryRelationsAsync(CategoryRelations? previous, CategoryRelations current, CancellationToken cancellationToken)
-            => _inner.ReplaceCategoryRelationsAsync(previous, current, cancellationToken);
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (previous is not null)
+            {
+                if (_bySport.TryGetValue(previous.Value.SportId, out var bySport))
+                {
+                    bySport.Remove(previous.Value.CategoryId);
+                }
+
+                if (previous.Value.ParentCategoryId is not null && _byParent.TryGetValue(previous.Value.ParentCategoryId.Value, out var byParent))
+                {
+                    byParent.Remove(previous.Value.CategoryId);
+                }
+            }
+
+            return IndexCategoryAsync(current, cancellationToken);
+        }
 
         public ValueTask ClearAsync(CancellationToken cancellationToken)
         {
             ClearCallCount++;
-            return _inner.ClearAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            _bySport.Clear();
+            _byParent.Clear();
+            return ValueTask.CompletedTask;
         }
 
         public ValueTask<IReadOnlySet<CategoryId>> GetCategoriesBySportAsync(SportId sportId, CancellationToken cancellationToken)
-            => _inner.GetCategoriesBySportAsync(sportId, cancellationToken);
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult<IReadOnlySet<CategoryId>>(_bySport.TryGetValue(sportId, out var set) ? set.ToHashSet() : []);
+        }
 
         public ValueTask RemoveCategoryRelationsAsync(CategoryRelations current, CancellationToken cancellationToken)
-            => _inner.RemoveCategoryRelationsAsync(current, cancellationToken);
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_bySport.TryGetValue(current.SportId, out var bySport))
+            {
+                bySport.Remove(current.CategoryId);
+            }
+
+            if (current.ParentCategoryId is not null && _byParent.TryGetValue(current.ParentCategoryId.Value, out var byParent))
+            {
+                byParent.Remove(current.CategoryId);
+            }
+
+            return ValueTask.CompletedTask;
+        }
 
         public ValueTask<IReadOnlySet<CategoryId>> GetCategoriesByParentAsync(CategoryId parentCategoryId, CancellationToken cancellationToken)
-            => _inner.GetCategoriesByParentAsync(parentCategoryId, cancellationToken);
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult<IReadOnlySet<CategoryId>>(_byParent.TryGetValue(parentCategoryId, out var set) ? set.ToHashSet() : []);
+        }
 
         public ValueTask<bool> HasCategoryBySportAsync(SportId sportId, CategoryId categoryId, CancellationToken cancellationToken)
-            => _inner.HasCategoryBySportAsync(sportId, categoryId, cancellationToken);
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(_bySport.TryGetValue(sportId, out var set) && set.Contains(categoryId));
+        }
 
         public ValueTask<bool> HasCategoryByParentAsync(CategoryId parentCategoryId, CategoryId categoryId, CancellationToken cancellationToken)
-            => _inner.HasCategoryByParentAsync(parentCategoryId, categoryId, cancellationToken);
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(_byParent.TryGetValue(parentCategoryId, out var set) && set.Contains(categoryId));
+        }
+
+        private static HashSet<TValue> GetOrCreate<TKey, TValue>(Dictionary<TKey, HashSet<TValue>> source, TKey key)
+            where TKey : notnull
+        {
+            if (!source.TryGetValue(key, out var set))
+            {
+                set = [];
+                source[key] = set;
+            }
+
+            return set;
+        }
     }
 
     private sealed class TrackingOrphanCategoryBySportIndex : ICategoryPendingIndex
     {
-        private readonly InMemoryOrphanCategoryBySportIndex _inner = new();
+        private readonly Dictionary<SportId, HashSet<CategoryId>> _waitingForSport = new();
+        private readonly Dictionary<CategoryId, HashSet<SportId>> _missingSports = new();
 
         public int ClearCallCount { get; private set; }
 
@@ -679,30 +747,90 @@ public sealed class GeoTaxonomyProcessorTests
                                                                    CategoryId categoryId,
                                                                    Func<SportId, CancellationToken, ValueTask<bool>> sportExistsCheck,
                                                                    CancellationToken cancellationToken)
-            => _inner.TryMarkCategoryWaitingForSportAsync(sportId, categoryId, sportExistsCheck, cancellationToken);
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (sportExistsCheck(sportId, cancellationToken).GetAwaiter().GetResult())
+            {
+                return ValueTask.FromResult(false);
+            }
+
+            GetOrCreate(_waitingForSport, sportId).Add(categoryId);
+            GetOrCreate(_missingSports, categoryId).Add(sportId);
+            return ValueTask.FromResult(true);
+        }
 
         public ValueTask ResolveCategoryWaitingForSportAsync(SportId sportId, CategoryId categoryId, CancellationToken cancellationToken)
-            => _inner.ResolveCategoryWaitingForSportAsync(sportId, categoryId, cancellationToken);
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            RemovePending(sportId, categoryId);
+            return ValueTask.CompletedTask;
+        }
 
         public ValueTask ClearAsync(CancellationToken cancellationToken)
         {
             ClearCallCount++;
-            return _inner.ClearAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            _waitingForSport.Clear();
+            _missingSports.Clear();
+            return ValueTask.CompletedTask;
         }
 
         public ValueTask<IReadOnlySet<CategoryId>> GetCategoriesWaitingForSportAsync(SportId sportId, CancellationToken cancellationToken)
-            => _inner.GetCategoriesWaitingForSportAsync(sportId, cancellationToken);
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult<IReadOnlySet<CategoryId>>(_waitingForSport.TryGetValue(sportId, out var set) ? set.ToHashSet() : []);
+        }
 
         public ValueTask<IReadOnlySet<SportId>> GetMissingSportsForCategoryAsync(CategoryId categoryId, CancellationToken cancellationToken)
-            => _inner.GetMissingSportsForCategoryAsync(categoryId, cancellationToken);
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult<IReadOnlySet<SportId>>(_missingSports.TryGetValue(categoryId, out var set) ? set.ToHashSet() : []);
+        }
 
         public ValueTask RemoveCategoryFromPendingAsync(CategoryId categoryId, CancellationToken cancellationToken)
-            => _inner.RemoveCategoryFromPendingAsync(categoryId, cancellationToken);
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_missingSports.TryGetValue(categoryId, out var sports))
+            {
+                foreach (var sportId in sports.ToArray())
+                {
+                    RemovePending(sportId, categoryId);
+                }
+            }
+
+            return ValueTask.CompletedTask;
+        }
+
+        private void RemovePending(SportId sportId, CategoryId categoryId)
+        {
+            if (_waitingForSport.TryGetValue(sportId, out var categories))
+            {
+                categories.Remove(categoryId);
+            }
+
+            if (_missingSports.TryGetValue(categoryId, out var sports))
+            {
+                sports.Remove(sportId);
+            }
+        }
+
+        private static HashSet<TValue> GetOrCreate<TKey, TValue>(Dictionary<TKey, HashSet<TValue>> source, TKey key)
+            where TKey : notnull
+        {
+            if (!source.TryGetValue(key, out var set))
+            {
+                set = [];
+                source[key] = set;
+            }
+
+            return set;
+        }
     }
 
     private sealed class TrackingGeoTaxonomyViewStorage : IGeoTaxonomyViewStorage
     {
-        private readonly InMemoryGeoTaxonomyViewStorage _inner = new();
+        private readonly Dictionary<SportId, GeoTaxonomyViewMessage> _views = new();
+        private readonly Dictionary<SportId, GeoTaxonomyViewMetadata> _metadata = new();
         private readonly List<string> _operationLog;
 
         public TrackingGeoTaxonomyViewStorage(List<string> operationLog)
@@ -714,16 +842,54 @@ public sealed class GeoTaxonomyProcessorTests
 
         public void SeedPublishedView(SportId id, GeoTaxonomyViewMessage view)
         {
-            var result = _inner.UpsertViewAsync(id, view, "build-seed", CancellationToken.None).GetAwaiter().GetResult();
-            _inner.MarkViewPublishedAsync(id, result.CalculatedVersion, result.BuildGenerationId, CancellationToken.None).GetAwaiter().GetResult();
+            var result = UpsertViewAsync(id, view, "build-seed", CancellationToken.None).GetAwaiter().GetResult();
+            MarkViewPublishedAsync(id, result.CalculatedVersion, result.BuildGenerationId, CancellationToken.None).GetAwaiter().GetResult();
         }
 
         public ValueTask<GeoTaxonomyViewMutationResult> UpsertSportAsync(SportId sportId, string sportName, string sportType, CancellationToken cancellationToken)
-            => _inner.UpsertSportAsync(sportId, sportName, sportType, cancellationToken);
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var current = _views.TryGetValue(sportId, out var existing) ? existing : GeoTaxonomyViewMessage.CreateNew(sportId.Value, sportName, sportType);
+            if (current.SportName == sportName && current.SportType == sportType)
+            {
+                return ValueTask.FromResult(GeoTaxonomyViewMutationResult.Unchanged(current));
+            }
+
+            var updated = current with { SportName = sportName, SportType = sportType };
+            var result = UpsertViewAsync(sportId, updated, GetBuildGenerationId(sportId), cancellationToken).GetAwaiter().GetResult();
+            return ValueTask.FromResult(GeoTaxonomyViewMutationResult.ChangedView(result.View));
+        }
 
         public async ValueTask<GeoTaxonomyViewUpsertResult> UpsertViewAsync(SportId sportId, GeoTaxonomyViewMessage view, string buildGenerationId, CancellationToken cancellationToken)
         {
-            var result = await _inner.UpsertViewAsync(sportId, view, buildGenerationId, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            var existingMetadata = _metadata.TryGetValue(sportId, out var metadata) ? metadata : null;
+            long previousCalculatedVersion = existingMetadata?.CalculatedVersion ?? 0;
+            long previousPublishedVersion = existingMetadata?.PublishedVersion ?? 0;
+            DateTimeOffset? previousPublishedAtUtc = existingMetadata?.PublishedAtUtc;
+            long nextVersion = Math.Max(previousCalculatedVersion, previousPublishedVersion) + 1;
+            var versionedView = view with { Version = checked((int)nextVersion) };
+            var updatedMetadata = new GeoTaxonomyViewMetadata
+            {
+                CalculatedVersion = nextVersion,
+                PublishedVersion = previousPublishedVersion,
+                BuildGenerationId = buildGenerationId,
+                UpdatedAtUtc = DateTimeOffset.UtcNow,
+                PublishedAtUtc = previousPublishedAtUtc
+            };
+
+            _views[sportId] = versionedView;
+            _metadata[sportId] = updatedMetadata;
+
+            var result = new GeoTaxonomyViewUpsertResult
+            {
+                SportId = sportId,
+                CalculatedVersion = nextVersion,
+                PublishedVersion = previousPublishedVersion,
+                BuildGenerationId = buildGenerationId,
+                View = versionedView
+            };
+
             UpsertCalls.Add(result);
             _operationLog.Add($"upsert:{sportId.Value}:{result.CalculatedVersion}:{buildGenerationId}");
             return result;
@@ -731,30 +897,89 @@ public sealed class GeoTaxonomyProcessorTests
 
         public async ValueTask MarkViewPublishedAsync(SportId sportId, long calculatedVersion, string buildGenerationId, CancellationToken cancellationToken)
         {
-            await _inner.MarkViewPublishedAsync(sportId, calculatedVersion, buildGenerationId, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_metadata.TryGetValue(sportId, out var metadata))
+            {
+                _metadata[sportId] = metadata with
+                {
+                    PublishedVersion = calculatedVersion,
+                    PublishedAtUtc = DateTimeOffset.UtcNow
+                };
+            }
+
             _operationLog.Add($"mark-published:{sportId.Value}:{calculatedVersion}");
         }
 
         public ValueTask<GeoTaxonomyViewMutationResult> UpsertCategoryAsync(SportId sportId, GeoTaxonomyNode node, CancellationToken cancellationToken)
-            => _inner.UpsertCategoryAsync(sportId, node, cancellationToken);
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!_views.TryGetValue(sportId, out var view))
+            {
+                return ValueTask.FromResult(GeoTaxonomyViewMutationResult.Missing());
+            }
+
+            var existing = view.GeoCategories.FirstOrDefault(category => category.CategoryId == node.CategoryId);
+            if (existing is not null && existing.Equals(node))
+            {
+                return ValueTask.FromResult(GeoTaxonomyViewMutationResult.Unchanged(view));
+            }
+
+            var updated = view with { GeoCategories = view.GeoCategories.Where(category => category.CategoryId != node.CategoryId).Append(node).ToImmutableHashSet(), Version = view.Version + 1 };
+            _views[sportId] = updated;
+            return ValueTask.FromResult(GeoTaxonomyViewMutationResult.ChangedView(updated));
+        }
 
         public ValueTask ClearAsync(CancellationToken cancellationToken)
         {
             ClearCallCount++;
-            return _inner.ClearAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            _views.Clear();
+            _metadata.Clear();
+            return ValueTask.CompletedTask;
         }
 
         public ValueTask<GeoTaxonomyViewMessage?> GetViewAsync(SportId sportId, CancellationToken cancellationToken)
-            => _inner.GetViewAsync(sportId, cancellationToken);
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(_views.TryGetValue(sportId, out var view) ? view : null);
+        }
 
         public ValueTask<GeoTaxonomyViewMutationResult> RemoveCategoryAsync(SportId sportId, CategoryId categoryId, CancellationToken cancellationToken)
-            => _inner.RemoveCategoryAsync(sportId, categoryId, cancellationToken);
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!_views.TryGetValue(sportId, out var view))
+            {
+                return ValueTask.FromResult(GeoTaxonomyViewMutationResult.Missing());
+            }
+
+            var removed = view.GeoCategories.Where(category => category.CategoryId == categoryId.Value).ToArray();
+            if (removed.Length == 0)
+            {
+                return ValueTask.FromResult(GeoTaxonomyViewMutationResult.Unchanged(view));
+            }
+
+            var updated = view with { GeoCategories = view.GeoCategories.Except(removed).ToImmutableHashSet(), Version = view.Version + 1 };
+            _views[sportId] = updated;
+            return ValueTask.FromResult(GeoTaxonomyViewMutationResult.ChangedView(updated));
+        }
 
         public ValueTask<GeoTaxonomyViewMessage?> RemoveViewAsync(SportId sportId, CancellationToken cancellationToken)
-            => _inner.RemoveViewAsync(sportId, cancellationToken);
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            _metadata.Remove(sportId);
+            return ValueTask.FromResult(_views.Remove(sportId, out var view) ? view : null);
+        }
 
         public ValueTask<GeoTaxonomyViewMetadata?> GetMetadataAsync(SportId sportId, CancellationToken cancellationToken)
-            => _inner.GetMetadataAsync(sportId, cancellationToken);
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(_metadata.TryGetValue(sportId, out var metadata) ? metadata : null);
+        }
+
+        private string GetBuildGenerationId(SportId sportId)
+            => _metadata.TryGetValue(sportId, out var metadata)
+                ? metadata.BuildGenerationId
+                : $"build-{Guid.CreateVersion7():N}";
     }
 
     private sealed class FakeCheckpointStorage : ICheckpointStorage

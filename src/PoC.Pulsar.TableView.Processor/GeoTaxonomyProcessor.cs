@@ -9,6 +9,8 @@ using PoC.Pulsar.TableView.Domain.Projector;
 using PoC.Pulsar.TableView.Domain.Sports;
 using PoC.Pulsar.TableView.Domain.Storages.StateStore;
 using PoC.Pulsar.TableView.Domain.TableView;
+using PoC.Pulsar.TableView.Infrastructure.Store.Observability;
+using System.Diagnostics;
 using System.Reactive.Linq;
 using System.Text.Json;
 
@@ -37,6 +39,8 @@ internal sealed class GeoTaxonomyProcessor
 
     public async Task RunAsync(CancellationToken cancellationToken)
     {
+        using var activity = ProjectorStoreTelemetry.StartActivity("geo_taxonomy.processor.run",
+                                                                   operation: "Run");
         _logger.LogInformation("Bootstrapping sports and categories table views.");
         var sportsBootstrapTask = _sportsTableView.StartBootstrapAsync(cancellationToken);
         var categoriesBootstrapTask = _categoriesTableView.StartBootstrapAsync(cancellationToken);
@@ -54,14 +58,35 @@ internal sealed class GeoTaxonomyProcessor
         bool requiresRebuild = RequiresRebuild(viewCheckpoint, sportsBootstrap, categoriesBootstrap);
         if (requiresRebuild)
         {
+            var rebuildStopwatch = Stopwatch.StartNew();
+            using var rebuildActivity = ProjectorStoreTelemetry.StartActivity("geo_taxonomy.rebuild",
+                                                                              operation: "rebuild",
+                                                                              phase: "rebuild");
             var sports = _sportsTableView.GetSnapshot();
             var categories = _categoriesTableView.GetSnapshot(new GeoCategoryMessageFilter());
+            rebuildActivity?.SetTag("sports.count", sports.Count);
+            rebuildActivity?.SetTag("categories.count", categories.Count);
 
-            using var unitOfWork = _unitOfWorkFactory.CreateGeoTaxonomyBuild();
-            await ClearProjectorStateAsync(cancellationToken, unitOfWork);
-            await BuildAsync(sports, categories, cancellationToken, unitOfWork);
-            await SaveViewCheckpointAsync(cancellationToken, unitOfWork);
-            await unitOfWork.CommitAsync(cancellationToken);
+            try
+            {
+                using var unitOfWork = _unitOfWorkFactory.CreateGeoTaxonomyBuild();
+                await ClearProjectorStateAsync(cancellationToken, unitOfWork);
+                await BuildAsync(sports, categories, cancellationToken, unitOfWork);
+                await SaveViewCheckpointAsync(cancellationToken, unitOfWork);
+                await unitOfWork.CommitAsync(cancellationToken);
+                var tags = GeoTaxonomyTags("rebuild", "rebuild", "success");
+                ProjectorStoreTelemetry.GeoTaxonomyRebuilds.Add(1, tags);
+                ProjectorStoreTelemetry.GeoTaxonomyOperationDuration.Record(rebuildStopwatch.Elapsed.TotalMilliseconds, tags);
+                rebuildActivity?.SetTag("result", "success");
+            }
+            catch (Exception exception)
+            {
+                var tags = GeoTaxonomyTags("rebuild", "rebuild", "error");
+                ProjectorStoreTelemetry.GeoTaxonomyOperationDuration.Record(rebuildStopwatch.Elapsed.TotalMilliseconds, tags);
+                rebuildActivity?.SetTag("result", "error");
+                rebuildActivity?.SetStatus(ActivityStatusCode.Error, exception.GetType().Name);
+                throw;
+            }
         }
         else
         {
@@ -114,11 +139,12 @@ internal sealed class GeoTaxonomyProcessor
             if (!sports.ContainsKey(category.SportId))
             {
                 await unitOfWork.CategoryPendingIndex.TryMarkCategoryWaitingForSportAsync(relations.SportId,
-                                                                                                 relations.CategoryId,
-                                                                                                 // in this process, we dont use the doble check because we have all the categories and we are not listen for new ones until the build is finished
-                                                                                                 // so we are sure that if the sport is not in the list we can avoid an extra read to the index
-                                                                                                 (sportId, ct) => ValueTask.FromResult(false),
-                                                                                                 cancellationToken);
+                                                                                                  relations.CategoryId,
+                                                                                                  // in this process, we dont use the doble check because we have all the categories and we are not listen for new ones until the build is finished
+                                                                                                  // so we are sure that if the sport is not in the list we can avoid an extra read to the index
+                                                                                                  (sportId, ct) => ValueTask.FromResult(false),
+                                                                                                  cancellationToken);
+                ProjectorStoreTelemetry.GeoTaxonomyPendingCategories.Add(1, GeoTaxonomyTags("pending_category", "rebuild", "success", entityType: "category"));
             }
         }
 
@@ -142,11 +168,13 @@ internal sealed class GeoTaxonomyProcessor
     {
         foreach (var sportChange in GetDeltaChanges(sportsBootstrap))
         {
+            RecordDeltaApplied("sport", sportChange);
             await OnSportChangeAsync(sportChange, cancellationToken, unitOfWork);
         }
 
         foreach (var categoryChange in GetDeltaChanges(categoriesBootstrap))
         {
+            RecordDeltaApplied("category", categoryChange);
             await OnCategoryChangeAsync(categoryChange, cancellationToken, unitOfWork);
         }
 
@@ -394,9 +422,10 @@ internal sealed class GeoTaxonomyProcessor
             if (sport is null)
             {
                 await currentUnitOfWork.CategoryPendingIndex.TryMarkCategoryWaitingForSportAsync(new SportId(rawCategoryMessage.SportId),
-                                                                                                 new CategoryId(rawCategoryMessage.Id),
-                                                                                                 (pendingSportId, ct) => ValueTask.FromResult(false),
-                                                                                                 cancellationToken);
+                                                                                                  new CategoryId(rawCategoryMessage.Id),
+                                                                                                  (pendingSportId, ct) => ValueTask.FromResult(false),
+                                                                                                  cancellationToken);
+                ProjectorStoreTelemetry.GeoTaxonomyPendingCategories.Add(1, GeoTaxonomyTags("pending_category", "live", "success", entityType: "category"));
                 return;
             }
 
@@ -501,8 +530,77 @@ internal sealed class GeoTaxonomyProcessor
                                                string buildGenerationId,
                                                CancellationToken cancellationToken)
     {
-        var result = await viewStorage.UpsertViewAsync(sportId, candidateView, buildGenerationId, cancellationToken);
-        await _taxonomyPublisher.PublishAsync(result.View, cancellationToken);
-        await viewStorage.MarkViewPublishedAsync(sportId, result.CalculatedVersion, buildGenerationId, cancellationToken);
+        var stopwatch = Stopwatch.StartNew();
+        using var activity = ProjectorStoreTelemetry.StartActivity("geo_taxonomy.view.save_publish",
+                                                                   operation: "save_publish_view");
+        activity?.SetTag("entity_type", "taxonomy_view");
+        activity?.SetTag("sport_id", sportId.Value);
+
+        try
+        {
+            var result = await viewStorage.UpsertViewAsync(sportId, candidateView, buildGenerationId, cancellationToken);
+            ProjectorStoreTelemetry.GeoTaxonomyViewsSaved.Add(1, GeoTaxonomyTags("save_publish_view", "live", "success", entityType: "taxonomy_view"));
+            await _taxonomyPublisher.PublishAsync(result.View, cancellationToken);
+            ProjectorStoreTelemetry.GeoTaxonomyViewsPublished.Add(1, GeoTaxonomyTags("save_publish_view", "live", "success", entityType: "taxonomy_view"));
+            await viewStorage.MarkViewPublishedAsync(sportId, result.CalculatedVersion, buildGenerationId, cancellationToken);
+            var tags = GeoTaxonomyTags("save_publish_view", "live", "success", entityType: "taxonomy_view");
+            ProjectorStoreTelemetry.GeoTaxonomyOperationDuration.Record(stopwatch.Elapsed.TotalMilliseconds, tags);
+            activity?.SetTag("result", "success");
+            activity?.SetTag("view.version", result.CalculatedVersion);
+        }
+        catch (Exception exception)
+        {
+            var tags = GeoTaxonomyTags("save_publish_view", "live", "error", entityType: "taxonomy_view");
+            ProjectorStoreTelemetry.GeoTaxonomyOperationDuration.Record(stopwatch.Elapsed.TotalMilliseconds, tags);
+            activity?.SetTag("result", "error");
+            activity?.SetStatus(ActivityStatusCode.Error, exception.GetType().Name);
+            throw;
+        }
+    }
+
+    private static void RecordDeltaApplied<TMessage>(string entityType, TableEntryChange<TMessage> change)
+    {
+        ProjectorStoreTelemetry.GeoTaxonomyDeltasApplied.Add(1,
+                                                             GeoTaxonomyTags("apply_delta",
+                                                                             "delta",
+                                                                             "success",
+                                                                             entityType,
+                                                                             GetChangeType(change)));
+    }
+
+    private static string GetChangeType<TMessage>(TableEntryChange<TMessage> change)
+        => change switch
+        {
+            TableEntryCreated<TMessage> => "created",
+            TableEntryUpdated<TMessage> => "updated",
+            EventDeleted<TMessage> => "deleted",
+            _ => "unknown"
+        };
+
+    private static KeyValuePair<string, object?>[] GeoTaxonomyTags(string operation,
+                                                                   string phase,
+                                                                   string result,
+                                                                   string? entityType = null,
+                                                                   string? changeType = null)
+    {
+        var tags = new List<KeyValuePair<string, object?>>
+        {
+            ProjectorStoreTelemetry.StoreTag,
+            new("operation", operation),
+            new("phase", phase),
+            new("result", result)
+        };
+
+        if (entityType is not null)
+        {
+            tags.Add(new KeyValuePair<string, object?>("entity_type", entityType));
+        }
+
+        if (changeType is not null)
+        {
+            tags.Add(new KeyValuePair<string, object?>("change_type", changeType));
+        }
+
+        return [.. tags];
     }
 }

@@ -1,3 +1,6 @@
+using MemoryPack;
+
 namespace PoC.Pulsar.TableView.Contracts;
 
-public sealed record GeoTaxonomyNode(string CategoryId, string CountryCode);
+[MemoryPackable]
+public sealed partial record GeoTaxonomyNode(string CategoryId, string CountryCode);

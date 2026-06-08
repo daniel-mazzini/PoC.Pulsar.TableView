@@ -77,7 +77,6 @@ internal static class ProcessorServiceCollectionExtensions
                 sp.GetRequiredService<StoreMetadata>(),
                 sp.GetRequiredService<ILogger<PulsarTableView<RawCategoryMessage>>>()));
 
-        services.AddSingleton<IGeoTaxonomyViewStorage, InMemoryGeoTaxonomyViewStorage>();
         services.AddSingleton<GeoTaxonomyProcessor>();
 
         return services;

@@ -40,9 +40,21 @@ public static class ProjectorStoreTelemetry
     public static readonly Counter<long> RejectedPublished = Meter.CreateCounter<long>("projector.rejected.published.total");
     public static readonly Counter<long> RejectedPublishErrors = Meter.CreateCounter<long>("projector.rejected.publish.errors.total");
 
+    public static readonly Counter<long> TaxonomyViewPublished = Meter.CreateCounter<long>("projector.taxonomy.view.published.total");
+    public static readonly Counter<long> TaxonomyViewPublishErrors = Meter.CreateCounter<long>("projector.taxonomy.view.publish.errors.total");
+    public static readonly Counter<long> TaxonomyViewDeleted = Meter.CreateCounter<long>("projector.taxonomy.view.deleted.total");
+
+    public static readonly Counter<long> GeoTaxonomyRebuilds = Meter.CreateCounter<long>("projector.geo_taxonomy.rebuilds.total");
+    public static readonly Counter<long> GeoTaxonomyDeltasApplied = Meter.CreateCounter<long>("projector.geo_taxonomy.deltas.applied.total");
+    public static readonly Counter<long> GeoTaxonomyViewsSaved = Meter.CreateCounter<long>("projector.geo_taxonomy.views.saved.total");
+    public static readonly Counter<long> GeoTaxonomyViewsPublished = Meter.CreateCounter<long>("projector.geo_taxonomy.views.published.total");
+    public static readonly Counter<long> GeoTaxonomyPendingCategories = Meter.CreateCounter<long>("projector.geo_taxonomy.pending.categories.total");
+
     // Histogram
     public static readonly Histogram<double> TopicMessageProcessingDuration = Meter.CreateHistogram<double>("projector.topic.message.processing.duration.ms");
     public static readonly Histogram<double> RejectedPublishDuration = Meter.CreateHistogram<double>("projector.rejected.publish.duration.ms");
+    public static readonly Histogram<double> TaxonomyViewPublishDuration = Meter.CreateHistogram<double>("projector.taxonomy.view.publish.duration.ms");
+    public static readonly Histogram<double> GeoTaxonomyOperationDuration = Meter.CreateHistogram<double>("projector.geo_taxonomy.operation.duration.ms");
 
 
     

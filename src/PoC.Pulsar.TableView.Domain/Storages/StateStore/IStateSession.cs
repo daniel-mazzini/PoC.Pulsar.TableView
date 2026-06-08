@@ -4,6 +4,3 @@ public interface IStateSession : IDisposable
 {
     Guid SessionId { get; }
 }
-
-
-

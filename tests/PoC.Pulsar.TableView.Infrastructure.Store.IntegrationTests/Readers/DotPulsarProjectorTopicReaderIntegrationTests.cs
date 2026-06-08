@@ -24,7 +24,7 @@ public sealed class DotPulsarProjectorTopicReaderIntegrationTests
     public async Task capture_high_watermark_async_should_return_last_message_id_for_isolated_topic()
     {
         var avroSerializer = IntegrationAvroSerializerFactory.Create();
-        var topicNamespace = await _fixture.CreateNamespaceAsync("tableview-inputs");
+        var topicNamespace = await _fixture.GetOrCreateSharedNamespaceAsync("tableview-inputs");
         var topicName = $"sports-{Guid.CreateVersion7():N}".ToLowerInvariant();
         await _fixture.CreatePartitionedTopicAsync(topicNamespace, topicName, 1);
         await using var client = await _fixture.CreateClientAsync();
@@ -47,7 +47,7 @@ public sealed class DotPulsarProjectorTopicReaderIntegrationTests
     public async Task create_reader_async_should_read_published_sport_message()
     {
         var avroSerializer = IntegrationAvroSerializerFactory.Create();
-        var topicNamespace = await _fixture.CreateNamespaceAsync("tableview-inputs");
+        var topicNamespace = await _fixture.GetOrCreateSharedNamespaceAsync("tableview-inputs");
         var topicName = $"sports-{Guid.CreateVersion7():N}".ToLowerInvariant();
         await _fixture.CreatePartitionedTopicAsync(topicNamespace, topicName, 1);
         await using var client = await _fixture.CreateClientAsync();
@@ -69,10 +69,36 @@ public sealed class DotPulsarProjectorTopicReaderIntegrationTests
     }
 
     [Fact]
+    public async Task create_reader_async_should_read_published_raw_category_message()
+    {
+        var avroSerializer = IntegrationAvroSerializerFactory.Create();
+        var topicNamespace = await _fixture.GetOrCreateSharedNamespaceAsync("tableview-inputs");
+        var topicName = $"categories-{Guid.CreateVersion7():N}".ToLowerInvariant();
+        await _fixture.CreatePartitionedTopicAsync(topicNamespace, topicName, 1);
+        await using var client = await _fixture.CreateClientAsync();
+        await using var producer = client.NewProducer(Schema.ByteSequence)
+            .Topic(PulsarTopics.Qualify(topicNamespace, topicName))
+            .Create();
+        var expected = IntegrationTestData.Category("category-1", "sport-1", version: 3);
+
+        await PublishCategoryAsync(producer, avroSerializer, expected);
+
+        var factory = new DotPulsarProjectorTopicReaderFactory(client, topicNamespace);
+        await using var reader = await factory.CreateReaderAsync(TopicShard.Partition(topicName, 0), MessageId.Earliest, CancellationToken.None);
+        var message = await reader.ReceiveAsync(CancellationToken.None);
+        var payload = avroSerializer.Deserialize<RawCategoryMessage>(message.Data);
+
+        Assert.Equal(topicName, message.TopicName);
+        Assert.Equal(expected.Id, message.Key);
+        Assert.Equal(expected.SportId, payload.SportId);
+        Assert.Equal(expected.Version, payload.Version);
+    }
+
+    [Fact]
     public async Task bootstrap_should_read_only_until_captured_high_watermark()
     {
         var avroSerializer = IntegrationAvroSerializerFactory.Create();
-        var topicNamespace = await _fixture.CreateNamespaceAsync("tableview-inputs");
+        var topicNamespace = await _fixture.GetOrCreateSharedNamespaceAsync("tableview-inputs");
         var topicName = $"sports-{Guid.CreateVersion7():N}".ToLowerInvariant();
         await _fixture.CreatePartitionedTopicAsync(topicNamespace, topicName, 1);
         await using var client = await _fixture.CreateClientAsync();
@@ -108,6 +134,15 @@ public sealed class DotPulsarProjectorTopicReaderIntegrationTests
     }
 
     private static async Task PublishSportAsync(IProducer<ReadOnlySequence<byte>> producer, PoC.Pulsar.TableView.Domain.Serializers.IAvroSerializer avroSerializer, SportMessage message)
+    {
+        using var stream = new MemoryStream();
+        avroSerializer.Serialize(message, stream);
+        var payload = new ReadOnlySequence<byte>(stream.ToArray());
+        var metadata = new MessageMetadata { Key = message.Id };
+        await producer.Send(metadata, payload, CancellationToken.None);
+    }
+
+    private static async Task PublishCategoryAsync(IProducer<ReadOnlySequence<byte>> producer, PoC.Pulsar.TableView.Domain.Serializers.IAvroSerializer avroSerializer, RawCategoryMessage message)
     {
         using var stream = new MemoryStream();
         avroSerializer.Serialize(message, stream);

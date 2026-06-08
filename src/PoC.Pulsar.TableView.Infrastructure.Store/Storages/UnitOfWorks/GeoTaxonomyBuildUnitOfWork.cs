@@ -10,13 +10,12 @@ public sealed class GeoTaxonomyBuildUnitOfWork : TsavoriteUnitOfWorkBase, IGeoTa
 {
     public GeoTaxonomyBuildUnitOfWork(ITsavoriteEngine engine,
                                       IMetadataStorage metadataStorage,
-                                      IStateSerializer stateSerializer,
-                                      IGeoTaxonomyViewStorage materializeViewStorage)
+                                      IStateSerializer stateSerializer)
         : base(engine)
     {
         CategoryRelationIndex = new TsavoriteCategoryRelationIndex(SessionWrapper, stateSerializer);
         CategoryPendingIndex = new TsavoriteCategoryPendingIndex(SessionWrapper, stateSerializer);
-        MaterializeViewStorage = materializeViewStorage;
+        MaterializeViewStorage = new TsavoriteGeoTaxonomyViewStorage(SessionWrapper, stateSerializer);
         CheckpointStorage = new CheckpointStorage(SessionWrapper, stateSerializer, metadataStorage);
     }
 

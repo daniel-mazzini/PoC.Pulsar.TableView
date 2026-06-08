@@ -12,6 +12,7 @@
 		<Project Path="tests/PoC.Pulsar.TableView.Contracts.UnitTests/PoC.Pulsar.TableView.Contracts.UnitTests.csproj" />
 		<Project Path="tests/PoC.Pulsar.TableView.Infrastructure.Store.IntegrationTests/PoC.Pulsar.TableView.Infrastructure.Store.IntegrationTests.csproj" />
 		<Project Path="tests/PoC.Pulsar.TableView.Infrastructure.Store.UnitTests/PoC.Pulsar.TableView.Infrastructure.Store.UnitTests.csproj" />
+		<Project Path="tests/PoC.Pulsar.TableView.Observability.UnitTests/PoC.Pulsar.TableView.Observability.UnitTests.csproj" />
 		<Project Path="tests/PoC.Pulsar.TableView.Processor.UnitTests/PoC.Pulsar.TableView.Processor.UnitTests.csproj" />
 	</Folder>
 </Solution>

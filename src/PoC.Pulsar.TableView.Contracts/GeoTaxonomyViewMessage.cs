@@ -1,8 +1,10 @@
+using MemoryPack;
 using System.Collections.Immutable;
 
 namespace PoC.Pulsar.TableView.Contracts;
 
-public sealed record GeoTaxonomyViewMessage
+[MemoryPackable]
+public sealed partial record GeoTaxonomyViewMessage
 {
     public string SportId { get; init; } = string.Empty;
     public string SportName { get; init; } = string.Empty;
@@ -13,6 +15,7 @@ public sealed record GeoTaxonomyViewMessage
 
     GeoTaxonomyViewMessage() { }
 
+    [MemoryPackConstructor]
     private GeoTaxonomyViewMessage(string sportId,
                                    string sportName,
                                    string sportType,
@@ -34,7 +37,6 @@ public sealed record GeoTaxonomyViewMessage
     public static GeoTaxonomyViewMessage CreateNew(string sportId, string sportName, string sportType)
     {
         return new GeoTaxonomyViewMessage(sportId, sportName, sportType, 0, []);
-
     }
 }
 

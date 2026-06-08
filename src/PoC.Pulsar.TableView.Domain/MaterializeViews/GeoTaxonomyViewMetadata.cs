@@ -1,6 +1,9 @@
+using MemoryPack;
+
 namespace PoC.Pulsar.TableView.Domain.MaterializeViews;
 
-public sealed record GeoTaxonomyViewMetadata
+[MemoryPackable]
+public sealed partial record GeoTaxonomyViewMetadata
 {
     public required long CalculatedVersion { get; init; }
     public required long PublishedVersion { get; init; }
