@@ -13,9 +13,9 @@ public sealed class GeoTaxonomyBuildUnitOfWork : TsavoriteUnitOfWorkBase, IGeoTa
                                       IStateSerializer stateSerializer)
         : base(engine)
     {
-        CategoryRelationIndex = new TsavoriteCategoryRelationIndex(SessionWrapper, stateSerializer);
-        CategoryPendingIndex = new TsavoriteCategoryPendingIndex(SessionWrapper, stateSerializer);
-        MaterializeViewStorage = new TsavoriteGeoTaxonomyViewStorage(SessionWrapper, stateSerializer);
+        CategoryRelationIndex = new DefaultCategoryRelationIndex(SessionWrapper, stateSerializer);
+        CategoryPendingIndex = new DefaultCategoryPendingIndex(SessionWrapper, stateSerializer);
+        MaterializeViewStorage = new DefaultGeoTaxonomyViewStorage(SessionWrapper, stateSerializer);
         CheckpointStorage = new CheckpointStorage(SessionWrapper, stateSerializer, metadataStorage);
     }
 

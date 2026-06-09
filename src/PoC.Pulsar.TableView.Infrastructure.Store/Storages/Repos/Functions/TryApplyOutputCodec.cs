@@ -2,7 +2,7 @@ using System.Buffers.Binary;
 using System.Text;
 using PoC.Pulsar.TableView.Domain.Projector;
 
-namespace PoC.Pulsar.TableView.Infrastructure.Store.Storages.Repos;
+namespace PoC.Pulsar.TableView.Infrastructure.Store.Storages.Repos.Functions;
 
 internal static class TryApplyOutputCodec
 {

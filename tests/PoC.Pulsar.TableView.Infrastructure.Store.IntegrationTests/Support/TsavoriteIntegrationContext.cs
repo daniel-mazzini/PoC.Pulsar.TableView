@@ -46,11 +46,11 @@ internal sealed class TsavoriteIntegrationContext : IDisposable
     public CategoryMessageStorage CreateCategoryMessageStorage()
         => new(Engine, StateSerializer);
 
-    public TsavoriteGeoTaxonomyViewStorage CreateGeoTaxonomyViewStorage()
+    public DefaultGeoTaxonomyViewStorage CreateGeoTaxonomyViewStorage()
     {
         var session = new TsavoriteSessionWrapper(Engine);
         _ownedSessions.Add(session);
-        return new TsavoriteGeoTaxonomyViewStorage(session, StateSerializer);
+        return new DefaultGeoTaxonomyViewStorage(session, StateSerializer);
     }
 
     public CheckpointStorage CreateCheckpointStorage()
@@ -59,18 +59,18 @@ internal sealed class TsavoriteIntegrationContext : IDisposable
     public RejectedStorage CreateRejectedStorage()
         => new(new PoC.Pulsar.TableView.Infrastructure.Store.Storages.Session.TsavoriteSessionWrapper(Engine), StateSerializer);
 
-    public TsavoriteCategoryRelationIndex CreateCategoryRelationIndex()
+    public DefaultCategoryRelationIndex CreateCategoryRelationIndex()
     {
         var session = new TsavoriteSessionWrapper(Engine);
         _ownedSessions.Add(session);
-        return new TsavoriteCategoryRelationIndex(session, StateSerializer);
+        return new DefaultCategoryRelationIndex(session, StateSerializer);
     }
 
-    public TsavoriteCategoryPendingIndex CreateCategoryPendingIndex()
+    public DefaultCategoryPendingIndex CreateCategoryPendingIndex()
     {
         var session = new TsavoriteSessionWrapper(Engine);
         _ownedSessions.Add(session);
-        return new TsavoriteCategoryPendingIndex(session, StateSerializer);
+        return new DefaultCategoryPendingIndex(session, StateSerializer);
     }
 
     public T? ReadSingleByPrefix<T>(string prefix)

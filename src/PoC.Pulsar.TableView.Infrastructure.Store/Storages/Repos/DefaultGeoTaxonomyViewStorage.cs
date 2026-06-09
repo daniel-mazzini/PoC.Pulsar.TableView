@@ -3,12 +3,11 @@ using PoC.Pulsar.TableView.Contracts;
 using PoC.Pulsar.TableView.Domain.Categories;
 using PoC.Pulsar.TableView.Domain.MaterializeViews;
 using PoC.Pulsar.TableView.Domain.Sports;
-using PoC.Pulsar.TableView.Domain.Storages.StateStore;
 using PoC.Pulsar.TableView.Infrastructure.Store.Storages.Session;
 
-namespace PoC.Pulsar.TableView.Infrastructure.Store.Storages;
+namespace PoC.Pulsar.TableView.Infrastructure.Store.Storages.Repos;
 
-public sealed class TsavoriteGeoTaxonomyViewStorage : TsavoriteRepositoryBase, IGeoTaxonomyViewStorage, IDisposable
+public sealed class DefaultGeoTaxonomyViewStorage : TsavoriteRepositoryBase, IGeoTaxonomyViewStorage, IDisposable
 {
     private static readonly byte[] ViewPrefixBytes = Encoding.UTF8.GetBytes(StorageKey.CountryTaxonomyMaterializedViewPrefix);
     private static readonly byte[] MetadataPrefixBytes = Encoding.UTF8.GetBytes(StorageKey.GeoTaxonomyViewMetadataPrefix);
@@ -17,7 +16,7 @@ public sealed class TsavoriteGeoTaxonomyViewStorage : TsavoriteRepositoryBase, I
     private readonly SemaphoreSlim _mutationGate = new(1, 1);
     private bool _disposed;
 
-    public TsavoriteGeoTaxonomyViewStorage(IStateSession session, IStateSerializer serializer)
+    public DefaultGeoTaxonomyViewStorage(IStateSession session, IStateSerializer serializer)
         : base(serializer)
     {
         ArgumentNullException.ThrowIfNull(session);

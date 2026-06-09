@@ -3,9 +3,9 @@ using PoC.Pulsar.TableView.Domain.Categories;
 using PoC.Pulsar.TableView.Domain.Sports;
 using PoC.Pulsar.TableView.Infrastructure.Store.Storages.Session;
 
-namespace PoC.Pulsar.TableView.Infrastructure.Store.Storages;
+namespace PoC.Pulsar.TableView.Infrastructure.Store.Storages.Repos;
 
-public sealed class TsavoriteCategoryRelationIndex : TsavoriteRepositoryBase, ICategoryRelationIndex, IDisposable
+public sealed class DefaultCategoryRelationIndex : TsavoriteRepositoryBase, ICategoryRelationIndex, IDisposable
 {
     private static readonly byte[] CategoryBySportPrefixBytes = Encoding.UTF8.GetBytes(StorageKey.CategoryBySportIndexPrefix);
     private static readonly byte[] CategoryByParentPrefixBytes = Encoding.UTF8.GetBytes(StorageKey.CategoryByParentIndexPrefix);
@@ -13,7 +13,7 @@ public sealed class TsavoriteCategoryRelationIndex : TsavoriteRepositoryBase, IC
     private readonly ITsavoriteSessionProvider _sessionProvider;
     private bool _disposed;
 
-    public TsavoriteCategoryRelationIndex(IStateSession session, IStateSerializer serializer)
+    public DefaultCategoryRelationIndex(IStateSession session, IStateSerializer serializer)
         : base(serializer)
     {
         ArgumentNullException.ThrowIfNull(session);

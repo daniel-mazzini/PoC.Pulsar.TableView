@@ -1,7 +1,5 @@
 using PoC.Pulsar.TableView.Contracts;
-using PoC.Pulsar.TableView.Domain.Categories;
 using PoC.Pulsar.TableView.Domain.Sports;
-using PoC.Pulsar.TableView.Infrastructure.Store.Storages;
 using PoC.Pulsar.TableView.Infrastructure.Store.IntegrationTests.Support;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.IntegrationTests.Storages;

@@ -1,5 +1,4 @@
 using PoC.Pulsar.TableView.Cli.Samples;
-using PoC.Pulsar.TableView.Contracts;
 using Xunit;
 
 namespace PoC.Pulsar.TableView.Cli.UnitTests.Samples;

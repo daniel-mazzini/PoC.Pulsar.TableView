@@ -3,7 +3,8 @@ using System.Text;
 using PoC.Pulsar.TableView.Contracts;
 using PoC.Pulsar.TableView.Domain.Filter;
 using PoC.Pulsar.TableView.Domain.Projector;
-using PoC.Pulsar.TableView.Domain.Storages.Entities;
+using PoC.Pulsar.TableView.Domain.Storages.Messages;
+using PoC.Pulsar.TableView.Infrastructure.Store.Storages.Repos.Functions;
 using PoC.Pulsar.TableView.Infrastructure.Store.Storages.Session;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.Storages.Repos;

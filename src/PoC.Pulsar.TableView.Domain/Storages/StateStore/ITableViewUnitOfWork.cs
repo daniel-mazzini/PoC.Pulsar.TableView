@@ -1,6 +1,6 @@
 using PoC.Pulsar.TableView.Domain.Checkpoints;
 using PoC.Pulsar.TableView.Domain.Rejected;
-using PoC.Pulsar.TableView.Domain.Storages.Entities;
+using PoC.Pulsar.TableView.Domain.Storages.Messages;
 
 namespace PoC.Pulsar.TableView.Domain.Storages.StateStore;
 

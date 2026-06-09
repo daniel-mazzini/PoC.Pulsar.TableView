@@ -7,7 +7,7 @@ using PoC.Pulsar.TableView.Infrastructure.Store.Readers;
 using System.Buffers;
 using System.Diagnostics;
 
-namespace PoC.Pulsar.TableView.Infrastructure.Store;
+namespace PoC.Pulsar.TableView.Infrastructure.Store.TableViewAppliers;
 public class SportMessageApplier : ITableViewMessageApplier<SportMessage>
 {
     private readonly IRejectedMessagePublisher _rejectedMessagePublisher;

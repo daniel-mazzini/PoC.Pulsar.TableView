@@ -1,7 +1,7 @@
 ﻿using PoC.Pulsar.TableView.Infrastructure.Store.Observability;
 using System.Buffers;
 
-namespace PoC.Pulsar.TableView.Infrastructure.Store.Storages;
+namespace PoC.Pulsar.TableView.Infrastructure.Store.Storages.Repos;
 
 using StateAllocator = SpanByteAllocator<StoreFunctions<SpanByte, SpanByte, SpanByteComparer, SpanByteRecordDisposer>>;
 public abstract class TsavoriteRepositoryBase

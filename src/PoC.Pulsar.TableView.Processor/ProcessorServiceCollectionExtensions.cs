@@ -18,6 +18,7 @@ using PoC.Pulsar.TableView.Infrastructure.Store.Storages;
 using PoC.Pulsar.TableView.Infrastructure.Store.Storages.Repos;
 using PoC.Pulsar.TableView.Infrastructure.Store.Storages.Session;
 using PoC.Pulsar.TableView.Infrastructure.Store.Storages.UnitOfWorks;
+using PoC.Pulsar.TableView.Infrastructure.Store.TableViewAppliers;
 using PoC.Pulsar.TableView.Processor.Configuration;
 
 namespace PoC.Pulsar.TableView.Processor;

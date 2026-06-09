@@ -177,7 +177,7 @@ public sealed class TsavoriteCategoryRelationIndexTests
         {
             using (var session = new TsavoriteSessionWrapper(engine))
             {
-                var index = new TsavoriteCategoryRelationIndex(session, serializer);
+                var index = new DefaultCategoryRelationIndex(session, serializer);
                 var sportId = new SportId("sport-live");
                 var parentId = new CategoryId("parent-live");
                 var categoryId = new CategoryId("category-live");
@@ -191,7 +191,7 @@ public sealed class TsavoriteCategoryRelationIndexTests
 
         using var reopenedEngine = new TsavoriteEngine(storeScope.StorePath);
         using var reopenedSession = new TsavoriteSessionWrapper(reopenedEngine);
-        using var reopenedIndex = new TsavoriteCategoryRelationIndex(reopenedSession, serializer);
+        using var reopenedIndex = new DefaultCategoryRelationIndex(reopenedSession, serializer);
         var reopenedSportId = new SportId("sport-live");
         var reopenedParentId = new CategoryId("parent-live");
         var reopenedCategoryId = new CategoryId("category-live");

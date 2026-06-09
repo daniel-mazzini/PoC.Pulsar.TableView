@@ -1,7 +1,7 @@
 using PoC.Pulsar.TableView.Domain.Filter;
 using PoC.Pulsar.TableView.Domain.Projector;
 
-namespace PoC.Pulsar.TableView.Domain.Storages.Entities;
+namespace PoC.Pulsar.TableView.Domain.Storages.Messages;
 
 public interface IMessageStorage<TKey, TMessage>
 {

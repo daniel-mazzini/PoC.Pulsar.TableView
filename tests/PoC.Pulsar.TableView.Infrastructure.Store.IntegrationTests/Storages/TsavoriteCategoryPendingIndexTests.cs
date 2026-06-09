@@ -200,7 +200,7 @@ public sealed class TsavoriteCategoryPendingIndexTests
         {
             using (var session = new TsavoriteSessionWrapper(engine))
             {
-                var index = new TsavoriteCategoryPendingIndex(session, serializer);
+                var index = new DefaultCategoryPendingIndex(session, serializer);
 
                 await index.TryMarkCategoryWaitingForSportAsync(new SportId("sport:live"),
                                                                 new CategoryId("soccer:int"),
@@ -214,7 +214,7 @@ public sealed class TsavoriteCategoryPendingIndexTests
 
         using var reopenedEngine = new TsavoriteEngine(storeScope.StorePath);
         using var reopenedSession = new TsavoriteSessionWrapper(reopenedEngine);
-        using var reopenedIndex = new TsavoriteCategoryPendingIndex(reopenedSession, serializer);
+        using var reopenedIndex = new DefaultCategoryPendingIndex(reopenedSession, serializer);
 
         Assert.Equal(["soccer:int"],
                      (await reopenedIndex.GetCategoriesWaitingForSportAsync(new SportId("sport:live"), CancellationToken.None))

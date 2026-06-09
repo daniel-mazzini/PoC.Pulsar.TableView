@@ -10,11 +10,10 @@ using PoC.Pulsar.TableView.Domain.Metadatas;
 using PoC.Pulsar.TableView.Domain.Projector;
 using PoC.Pulsar.TableView.Domain.Rejected;
 using PoC.Pulsar.TableView.Domain.Sports;
-using PoC.Pulsar.TableView.Domain.Storages.Entities;
 using PoC.Pulsar.TableView.Domain.Storages.StateStore;
 using PoC.Pulsar.TableView.Domain.TableView;
-using PoC.Pulsar.TableView.Infrastructure.Store.Storages;
 using Xunit;
+using PoC.Pulsar.TableView.Domain.Storages.Messages;
 
 namespace PoC.Pulsar.TableView.Processor.UnitTests;
 
@@ -242,6 +241,113 @@ public sealed class GeoTaxonomyProcessorTests
     }
 
     [Fact]
+    public async Task category_created_should_publish_taxonomy_when_sport_exists()
+    {
+        var sports = new FakePulsarTableView<SportMessage>([Sport("sport-1", "Soccer", "SOCCER")]);
+        var categories = new FakePulsarTableView<RawCategoryMessage>();
+        var publisher = new FakeTaxonomyViewPublisher();
+        var processor = CreateProcessor(sports, categories, publisher);
+
+        await using var runner = await ProcessorRunner.StartAsync(processor, sports, categories);
+        var category = Category("category-es", "sport-1", "ES");
+        categories.Upsert(category.Id, category);
+        categories.EmitCreate(category.Id, category);
+        var taxonomy = await publisher.WaitForPublishedCountAsync(2);
+        var updated = taxonomy[^1];
+
+        Assert.Equal("sport-1", updated.SportId);
+        Assert.Equal("Soccer", updated.SportName);
+        Assert.Equal("SOCCER", updated.SportType);
+        Assert.Equal(["ES"], updated.GeoCategories.Select(categoryNode => categoryNode.CountryCode));
+    }
+
+    [Fact]
+    public async Task category_created_before_sport_should_wait_pending_and_resolve_when_sport_arrives()
+    {
+        var dependencies = CreateDependencies(new StoreMetadata(Guid.NewGuid(), SchemaVersion: 1, IsBoostrapCompleted: true, CreatedAt: DateTimeOffset.UtcNow));
+        var sports = new FakePulsarTableView<SportMessage>();
+        var categories = new FakePulsarTableView<RawCategoryMessage>();
+        var publisher = new FakeTaxonomyViewPublisher();
+        var processor = CreateProcessor(sports, categories, publisher, dependencies);
+
+        await using var runner = await ProcessorRunner.StartAsync(processor, sports, categories);
+        var category = Category("category-es", "sport-1", "ES");
+        categories.Upsert(category.Id, category);
+        categories.EmitCreate(category.Id, category);
+
+        Assert.Equal(["category-es"],
+                     (await dependencies.PendingIndex.GetCategoriesWaitingForSportAsync(new SportId("sport-1"), CancellationToken.None))
+                     .Select(categoryId => categoryId.Value));
+        Assert.Empty(publisher.PublishedTaxonomies);
+
+        var sport = Sport("sport-1", "Soccer", "SOCCER");
+        sports.Upsert(sport.Id, sport);
+        sports.EmitCreate(sport.Id, sport);
+        var taxonomy = Assert.Single(await publisher.WaitForPublishedCountAsync(1));
+
+        Assert.Equal("sport-1", taxonomy.SportId);
+        Assert.Equal(["ES"], taxonomy.GeoCategories.Select(category => category.CountryCode));
+        Assert.Empty(await dependencies.PendingIndex.GetCategoriesWaitingForSportAsync(new SportId("sport-1"), CancellationToken.None));
+        Assert.Empty(await dependencies.PendingIndex.GetMissingSportsForCategoryAsync(new CategoryId("category-es"), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task category_created_without_geo_country_code_should_not_wait_pending_or_publish()
+    {
+        var dependencies = CreateDependencies(new StoreMetadata(Guid.NewGuid(), SchemaVersion: 1, IsBoostrapCompleted: true, CreatedAt: DateTimeOffset.UtcNow));
+        var sports = new FakePulsarTableView<SportMessage>();
+        var categories = new FakePulsarTableView<RawCategoryMessage>();
+        var publisher = new FakeTaxonomyViewPublisher();
+        var processor = CreateProcessor(sports, categories, publisher, dependencies);
+
+        await using var runner = await ProcessorRunner.StartAsync(processor, sports, categories);
+        var nullCountryCodeCategory = Category("category-null", "sport-1", null);
+        var emptyCountryCodeCategory = Category("category-empty", "sport-1", "");
+        var whitespaceCountryCodeCategory = Category("category-whitespace", "sport-1", "   ");
+        categories.Upsert(nullCountryCodeCategory.Id, nullCountryCodeCategory);
+        categories.Upsert(emptyCountryCodeCategory.Id, emptyCountryCodeCategory);
+        categories.Upsert(whitespaceCountryCodeCategory.Id, whitespaceCountryCodeCategory);
+
+        categories.EmitCreate(nullCountryCodeCategory.Id, nullCountryCodeCategory);
+        categories.EmitCreate(emptyCountryCodeCategory.Id, emptyCountryCodeCategory);
+        categories.EmitCreate(whitespaceCountryCodeCategory.Id, whitespaceCountryCodeCategory);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+
+        Assert.Empty(await dependencies.PendingIndex.GetCategoriesWaitingForSportAsync(new SportId("sport-1"), CancellationToken.None));
+        Assert.Empty(publisher.PublishedTaxonomies);
+    }
+
+    [Fact]
+    public async Task category_update_should_wait_pending_when_geo_category_becomes_eligible_before_sport_arrives()
+    {
+        var dependencies = CreateDependencies(new StoreMetadata(Guid.NewGuid(), SchemaVersion: 1, IsBoostrapCompleted: true, CreatedAt: DateTimeOffset.UtcNow));
+        var sports = new FakePulsarTableView<SportMessage>();
+        var oldCategory = Category("category-es", "sport-1", null);
+        var categories = new FakePulsarTableView<RawCategoryMessage>([oldCategory]);
+        var publisher = new FakeTaxonomyViewPublisher();
+        var processor = CreateProcessor(sports, categories, publisher, dependencies);
+
+        await using var runner = await ProcessorRunner.StartAsync(processor, sports, categories);
+        var category = Category("category-es", "sport-1", "ES");
+        categories.Upsert(category.Id, category);
+        categories.EmitUpdate(category.Id, category, oldCategory);
+
+        Assert.Equal(["category-es"],
+                     (await dependencies.PendingIndex.GetCategoriesWaitingForSportAsync(new SportId("sport-1"), CancellationToken.None))
+                     .Select(categoryId => categoryId.Value));
+        Assert.Empty(publisher.PublishedTaxonomies);
+
+        var sport = Sport("sport-1", "Soccer", "SOCCER");
+        sports.Upsert(sport.Id, sport);
+        sports.EmitCreate(sport.Id, sport);
+        var taxonomy = Assert.Single(await publisher.WaitForPublishedCountAsync(1));
+
+        Assert.Equal("sport-1", taxonomy.SportId);
+        Assert.Equal(["ES"], taxonomy.GeoCategories.Select(categoryNode => categoryNode.CountryCode));
+        Assert.Empty(await dependencies.PendingIndex.GetCategoriesWaitingForSportAsync(new SportId("sport-1"), CancellationToken.None));
+    }
+
+    [Fact]
     public async Task category_update_should_publish_taxonomy_for_category_sport()
     {
         var sports = new FakePulsarTableView<SportMessage>([Sport("sport-1", "Soccer", "SOCCER")]);
@@ -259,6 +365,29 @@ public sealed class GeoTaxonomyProcessorTests
 
         Assert.Equal("sport-1", updated.SportId);
         Assert.Equal(["ES"], updated.GeoCategories.Select(categoryNode => categoryNode.CountryCode));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task category_update_should_remove_geo_category_when_country_code_becomes_missing(string? countryCode)
+    {
+        var sports = new FakePulsarTableView<SportMessage>([Sport("sport-1", "Soccer", "SOCCER")]);
+        var existingCategory = Category("category-es", "sport-1", "ES");
+        var categories = new FakePulsarTableView<RawCategoryMessage>([existingCategory]);
+        var publisher = new FakeTaxonomyViewPublisher();
+        var processor = CreateProcessor(sports, categories, publisher);
+
+        await using var runner = await ProcessorRunner.StartAsync(processor, sports, categories);
+        var category = Category("category-es", "sport-1", countryCode);
+        categories.Upsert(category.Id, category);
+        categories.EmitUpdate(category.Id, category, existingCategory);
+        var taxonomies = await publisher.WaitForPublishedCountAsync(2);
+        var updated = taxonomies[^1];
+
+        Assert.Equal("sport-1", updated.SportId);
+        Assert.Empty(updated.GeoCategories);
     }
 
     [Fact]
@@ -473,6 +602,11 @@ public sealed class GeoTaxonomyProcessorTests
         public void Upsert(string key, T value)
         {
             _items[key] = value;
+        }
+
+        public void EmitCreate(string key, T value)
+        {
+            _updates.OnNext(new TableEntryCreated<T>(key, value));
         }
 
         public void Delete(string key)

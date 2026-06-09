@@ -9,7 +9,7 @@ using PoC.Pulsar.TableView.Domain.Metadatas;
 using PoC.Pulsar.TableView.Domain.Projector;
 using PoC.Pulsar.TableView.Domain.Rejected;
 using PoC.Pulsar.TableView.Domain.Sports;
-using PoC.Pulsar.TableView.Domain.Storages.Entities;
+using PoC.Pulsar.TableView.Domain.Storages.Messages;
 using PoC.Pulsar.TableView.Domain.Storages.StateStore;
 using PoC.Pulsar.TableView.Domain.TableView;
 using PoC.Pulsar.TableView.Processor;

@@ -2,7 +2,7 @@ using System.Buffers;
 using PoC.Pulsar.TableView.Contracts;
 using PoC.Pulsar.TableView.Domain.Projector;
 
-namespace PoC.Pulsar.TableView.Infrastructure.Store.Storages.Repos;
+namespace PoC.Pulsar.TableView.Infrastructure.Store.Storages.Repos.Functions;
 
 internal sealed class TryApplyRawCategoryMessageFunctions : SessionFunctionsBase<SpanByte, SpanByte, TryApplyRawCategoryMessageCommand, SpanByteAndMemory, Empty>
 {

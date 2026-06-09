@@ -6,7 +6,7 @@ using PoC.Pulsar.TableView.Infrastructure.Store.Observability;
 using System.Buffers;
 using System.Diagnostics;
 
-namespace PoC.Pulsar.TableView.Infrastructure.Store;
+namespace PoC.Pulsar.TableView.Infrastructure.Store.TableViewAppliers;
 
 public sealed class RawCategoryMessageApplier : ITableViewMessageApplier<RawCategoryMessage>
 {

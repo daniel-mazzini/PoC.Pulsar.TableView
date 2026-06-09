@@ -244,9 +244,9 @@ internal sealed class GeoTaxonomyProcessor
             else
             {
                 var rawCategoryMessage = await _categoriesTableView.GetEntry(categoryId.Value, cancellationToken);
-                if (rawCategoryMessage?.CountryCode != null)
+                if (IsGeoCategory(rawCategoryMessage))
                 {
-                    nodes.Add(new GeoTaxonomyNode(rawCategoryMessage.Id, rawCategoryMessage.CountryCode!));
+                    nodes.Add(new GeoTaxonomyNode(rawCategoryMessage!.Id, rawCategoryMessage.CountryCode!));
                 }
             }
         }
@@ -260,9 +260,9 @@ internal sealed class GeoTaxonomyProcessor
         foreach (var categoryId in categoriesIds)
         {
             var rawCategoryMessage = await _categoriesTableView.GetEntry(categoryId.Value, cancellationToken);
-            if (rawCategoryMessage?.CountryCode != null)
+            if (IsGeoCategory(rawCategoryMessage))
             {
-                nodes.Add(new GeoTaxonomyNode(rawCategoryMessage.Id, rawCategoryMessage.CountryCode!));
+                nodes.Add(new GeoTaxonomyNode(rawCategoryMessage!.Id, rawCategoryMessage.CountryCode!));
             }
         }
 
@@ -377,7 +377,7 @@ internal sealed class GeoTaxonomyProcessor
         {
             await currentUnitOfWork.CategoryRelationIndex.IndexCategoryAsync(currentRelations, cancellationToken);
 
-            if (category.CountryCode is null)
+            if (!IsGeoCategory(category))
             {
                 await currentUnitOfWork.CategoryRelationIndex.RemoveCategoryRelationsAsync(currentRelations, cancellationToken);
                 await currentUnitOfWork.CategoryPendingIndex.RemoveCategoryFromPendingAsync(currentRelations.CategoryId, cancellationToken);
@@ -391,8 +391,19 @@ internal sealed class GeoTaxonomyProcessor
                 return;
             }
 
+            var sport = await _sportsTableView.GetEntry(category.SportId, cancellationToken);
+            if (sport is null)
+            {
+                await currentUnitOfWork.CategoryPendingIndex.TryMarkCategoryWaitingForSportAsync(currentRelations.SportId,
+                                                                                                  currentRelations.CategoryId,
+                                                                                                  (pendingSportId, ct) => ValueTask.FromResult(false),
+                                                                                                  cancellationToken);
+                ProjectorStoreTelemetry.GeoTaxonomyPendingCategories.Add(1, GeoTaxonomyTags("pending_category", "live", "success", entityType: "category"));
+                return;
+            }
+
             var result = await currentUnitOfWork.MaterializeViewStorage.UpsertCategoryAsync(new SportId(category.SportId),
-                                                                                           new GeoTaxonomyNode(category.Id, category.CountryCode),
+                                                                                           new GeoTaxonomyNode(category.Id, category.CountryCode!),
                                                                                            cancellationToken);
 
             if (result.Changed && result.View is not null)
@@ -406,7 +417,7 @@ internal sealed class GeoTaxonomyProcessor
                                          CancellationToken cancellationToken,
                                          IGeoTaxonomyBuildUnitOfWork? unitOfWork = null)
     {
-        if (rawCategoryMessage.CountryCode is null)
+        if (!IsGeoCategory(rawCategoryMessage))
         {
             return;
         }
@@ -523,6 +534,9 @@ internal sealed class GeoTaxonomyProcessor
 
     private static string CreateBuildGenerationId()
         => $"build-{Guid.CreateVersion7():N}";
+
+    private static bool IsGeoCategory(RawCategoryMessage? category)
+        => !string.IsNullOrWhiteSpace(category?.CountryCode);
 
     private async Task SaveAndPublishViewAsync(IGeoTaxonomyViewStorage viewStorage,
                                                SportId sportId,

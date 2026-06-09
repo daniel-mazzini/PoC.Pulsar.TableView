@@ -1,5 +1,5 @@
 using PoC.Pulsar.TableView.Domain.Projector;
-using PoC.Pulsar.TableView.Infrastructure.Store.Storages.Repos;
+using PoC.Pulsar.TableView.Infrastructure.Store.Storages.Repos.Functions;
 using Tsavorite.core;
 using Xunit;
 
