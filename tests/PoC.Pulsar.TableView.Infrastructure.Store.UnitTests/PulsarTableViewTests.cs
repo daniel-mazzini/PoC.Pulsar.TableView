@@ -7,6 +7,7 @@ using PoC.Pulsar.TableView.Domain.Metadatas;
 using PoC.Pulsar.TableView.Domain.Projector;
 using PoC.Pulsar.TableView.Domain.Storages.StateStore;
 using PoC.Pulsar.TableView.Domain.TableView;
+using PoC.Pulsar.TableView.Infrastructure.Store.TableViewAppliers;
 using Xunit;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.UnitTests;

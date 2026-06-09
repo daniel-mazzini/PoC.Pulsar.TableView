@@ -1,13 +1,15 @@
 using PoC.Pulsar.TableView.Domain.Categories;
 using PoC.Pulsar.TableView.Domain.Sports;
+using PoC.Pulsar.TableView.Domain.Storages.StateStore;
 using PoC.Pulsar.TableView.Infrastructure.Store.IntegrationTests.Support;
 using PoC.Pulsar.TableView.Infrastructure.Store.Serialization;
 using PoC.Pulsar.TableView.Infrastructure.Store.Storages;
+using PoC.Pulsar.TableView.Infrastructure.Store.Storages.Repos;
 using PoC.Pulsar.TableView.Infrastructure.Store.Storages.Session;
 
-namespace PoC.Pulsar.TableView.Infrastructure.Store.IntegrationTests.Storages;
+namespace PoC.Pulsar.TableView.Infrastructure.Store.IntegrationTests.Storages.Repos;
 
-public sealed class TsavoriteCategoryPendingIndexTests
+public sealed class DefaultCategoryPendingIndexTests
 {
     [Fact]
     public async Task get_categories_waiting_for_sport_async_should_return_real_category_ids_when_key_is_encoded()
@@ -188,6 +190,70 @@ public sealed class TsavoriteCategoryPendingIndexTests
         Assert.Empty(await index.GetCategoriesWaitingForSportAsync(new SportId("sport:2"), CancellationToken.None));
         Assert.Empty(await index.GetMissingSportsForCategoryAsync(new CategoryId("category:1"), CancellationToken.None));
         Assert.Empty(await index.GetMissingSportsForCategoryAsync(new CategoryId("category:2"), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task get_categories_waiting_for_sport_async_should_read_10_000_pending_categories_by_prefix()
+    {
+        using var context = new TsavoriteIntegrationContext(nameof(get_categories_waiting_for_sport_async_should_read_10_000_pending_categories_by_prefix));
+        using var index = context.CreateCategoryPendingIndex();
+        var sportId = new SportId("sport-prefix");
+
+        for (var entryIndex = 0; entryIndex < 10_000; entryIndex++)
+        {
+            await index.TryMarkCategoryWaitingForSportAsync(sportId,
+                                                            new CategoryId($"category-{entryIndex}"),
+                                                            static (_, _) => ValueTask.FromResult(false),
+                                                            CancellationToken.None);
+        }
+
+        var categories = await index.GetCategoriesWaitingForSportAsync(sportId, CancellationToken.None);
+
+        Assert.Equal(10_000, categories.Count);
+        Assert.Contains(categories, category => category.Value == "category-0");
+        Assert.Contains(categories, category => category.Value == "category-9999");
+    }
+
+    [Fact]
+    public async Task get_missing_sports_for_category_async_should_read_10_000_missing_sports_by_prefix()
+    {
+        using var context = new TsavoriteIntegrationContext(nameof(get_missing_sports_for_category_async_should_read_10_000_missing_sports_by_prefix));
+        using var index = context.CreateCategoryPendingIndex();
+        var categoryId = new CategoryId("category-prefix");
+
+        for (var entryIndex = 0; entryIndex < 10_000; entryIndex++)
+        {
+            await index.TryMarkCategoryWaitingForSportAsync(new SportId($"sport-{entryIndex}"),
+                                                            categoryId,
+                                                            static (_, _) => ValueTask.FromResult(false),
+                                                            CancellationToken.None);
+        }
+
+        var sports = await index.GetMissingSportsForCategoryAsync(categoryId, CancellationToken.None);
+
+        Assert.Equal(10_000, sports.Count);
+        Assert.Contains(sports, sport => sport.Value == "sport-0");
+        Assert.Contains(sports, sport => sport.Value == "sport-9999");
+    }
+
+    [Fact]
+    public async Task clear_async_should_remove_1_000_000_pending_records()
+    {
+        using var context = new TsavoriteIntegrationContext(nameof(clear_async_should_remove_1_000_000_pending_records));
+        using var index = context.CreateCategoryPendingIndex();
+
+        for (var entryIndex = 0; entryIndex < 500_000; entryIndex++)
+        {
+            await index.TryMarkCategoryWaitingForSportAsync(new SportId($"sport-{entryIndex}"),
+                                                            new CategoryId($"category-{entryIndex}"),
+                                                            static (_, _) => ValueTask.FromResult(false),
+                                                            CancellationToken.None);
+        }
+
+        await index.ClearAsync(CancellationToken.None);
+
+        Assert.Empty(context.ReadAllByPrefix<string>(StorageKey.OrphanCategoryBySportIndexPrefix));
+        Assert.Empty(context.ReadAllByPrefix<string>(StorageKey.OrphanSportByCategoryIndexPrefix));
     }
 
     [Fact]

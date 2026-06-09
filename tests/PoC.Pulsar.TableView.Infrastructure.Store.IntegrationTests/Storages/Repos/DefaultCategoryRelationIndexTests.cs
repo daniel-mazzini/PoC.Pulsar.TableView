@@ -1,12 +1,14 @@
 using PoC.Pulsar.TableView.Domain.Categories;
 using PoC.Pulsar.TableView.Domain.Sports;
+using PoC.Pulsar.TableView.Domain.Storages.StateStore;
 using PoC.Pulsar.TableView.Infrastructure.Store.Storages;
+using PoC.Pulsar.TableView.Infrastructure.Store.Storages.Repos;
 using PoC.Pulsar.TableView.Infrastructure.Store.Storages.Session;
 using PoC.Pulsar.TableView.Infrastructure.Store.IntegrationTests.Support;
 
-namespace PoC.Pulsar.TableView.Infrastructure.Store.IntegrationTests.Storages;
+namespace PoC.Pulsar.TableView.Infrastructure.Store.IntegrationTests.Storages.Repos;
 
-public sealed class TsavoriteCategoryRelationIndexTests
+public sealed class DefaultCategoryRelationIndexTests
 {
     [Fact]
     public async Task get_categories_by_sport_async_should_return_real_category_ids_when_key_is_sanitized()
@@ -165,6 +167,65 @@ public sealed class TsavoriteCategoryRelationIndexTests
         Assert.Empty(await index.GetCategoriesBySportAsync(new SportId("sport-1"), CancellationToken.None));
         Assert.Empty(await index.GetCategoriesBySportAsync(new SportId("sport-2"), CancellationToken.None));
         Assert.Empty(await index.GetCategoriesByParentAsync(new CategoryId("parent-1"), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task get_categories_by_sport_async_should_read_10_000_relations_by_prefix()
+    {
+        using var context = new TsavoriteIntegrationContext(nameof(get_categories_by_sport_async_should_read_10_000_relations_by_prefix));
+        using var index = context.CreateCategoryRelationIndex();
+        var sportId = new SportId("sport-prefix");
+
+        for (var entryIndex = 0; entryIndex < 10_000; entryIndex++)
+        {
+            await index.IndexCategoryAsync(new CategoryRelations(new CategoryId($"category-{entryIndex}"), sportId, null), CancellationToken.None);
+        }
+
+        var categories = await index.GetCategoriesBySportAsync(sportId, CancellationToken.None);
+
+        Assert.Equal(10_000, categories.Count);
+        Assert.Contains(categories, category => category.Value == "category-0");
+        Assert.Contains(categories, category => category.Value == "category-9999");
+    }
+
+    [Fact]
+    public async Task get_categories_by_parent_async_should_read_10_000_relations_by_prefix()
+    {
+        using var context = new TsavoriteIntegrationContext(nameof(get_categories_by_parent_async_should_read_10_000_relations_by_prefix));
+        using var index = context.CreateCategoryRelationIndex();
+        var parentId = new CategoryId("parent-prefix");
+
+        for (var entryIndex = 0; entryIndex < 10_000; entryIndex++)
+        {
+            await index.IndexCategoryAsync(new CategoryRelations(new CategoryId($"category-{entryIndex}"), new SportId($"sport-{entryIndex}"), parentId), CancellationToken.None);
+        }
+
+        var categories = await index.GetCategoriesByParentAsync(parentId, CancellationToken.None);
+
+        Assert.Equal(10_000, categories.Count);
+        Assert.Contains(categories, category => category.Value == "category-0");
+        Assert.Contains(categories, category => category.Value == "category-9999");
+    }
+
+    [Fact]
+    public async Task clear_async_should_remove_1_000_000_relation_records()
+    {
+        using var context = new TsavoriteIntegrationContext(nameof(clear_async_should_remove_1_000_000_relation_records));
+        using var index = context.CreateCategoryRelationIndex();
+
+        for (var entryIndex = 0; entryIndex < 500_000; entryIndex++)
+        {
+            await index.IndexCategoryAsync(new CategoryRelations(new CategoryId($"category-{entryIndex}"),
+                                                                new SportId($"sport-{entryIndex % 100}"),
+                                                                new CategoryId($"parent-{entryIndex % 100}")),
+                                           CancellationToken.None);
+        }
+        
+        context.Engine.DeferDurableCheckpoints();
+        await index.ClearAsync(CancellationToken.None);
+
+        Assert.Empty(context.ReadAllByPrefix<string>(StorageKey.CategoryBySportIndexPrefix));
+        Assert.Empty(context.ReadAllByPrefix<string>(StorageKey.CategoryByParentIndexPrefix));
     }
 
     [Fact]

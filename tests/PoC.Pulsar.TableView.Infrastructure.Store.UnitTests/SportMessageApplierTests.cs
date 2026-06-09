@@ -3,6 +3,7 @@ using System.Text.Json;
 using PoC.Pulsar.TableView.Contracts;
 using PoC.Pulsar.TableView.Domain.Projector;
 using PoC.Pulsar.TableView.Domain.TableView;
+using PoC.Pulsar.TableView.Infrastructure.Store.TableViewAppliers;
 using Xunit;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.UnitTests;

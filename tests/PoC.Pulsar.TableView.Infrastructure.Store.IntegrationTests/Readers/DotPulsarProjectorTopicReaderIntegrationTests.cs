@@ -6,6 +6,7 @@ using PoC.Pulsar.TableView.Domain.Metadatas;
 using PoC.Pulsar.TableView.Domain.TableView;
 using PoC.Pulsar.TableView.Infrastructure.Store.IntegrationTests.Support;
 using PoC.Pulsar.TableView.Infrastructure.Store.Readers;
+using PoC.Pulsar.TableView.Infrastructure.Store.TableViewAppliers;
 using System.Buffers;
 
 namespace PoC.Pulsar.TableView.Infrastructure.Store.IntegrationTests.Readers;
